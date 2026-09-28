@@ -1,5 +1,16 @@
 # Spp (Seasonal++)
 
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white)](#building)
+[![CMake](https://img.shields.io/badge/CMake-3.28%2B-064F8C?logo=cmake&logoColor=white)](#building)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20MSYS2%20UCRT64-0078D6)](#requirements)
+[![Ephemeris](https://img.shields.io/badge/ephemeris-VSOP87D%20%C2%B7%202%2C425%20terms-E07B39)](#3-heliocentric-earth-vsop87d)
+[![Dependencies](https://img.shields.io/badge/dependencies-none-2EA043)](#features)
+[![Floating point](https://img.shields.io/badge/fp64-strict%20IEEE%20754-6E40C9)](#floating-point-policy)
+[![Viewer](https://img.shields.io/badge/viewer-OpenGL%203.3-5586A4?logo=opengl&logoColor=white)](#azimuth-spirals)
+
+![Daylight and twilight through the year in Paris, computed with Spp](docs/images/daylight.svg)
+
 Spp is a C++20 library for high-precision solar positional astronomy. It
 computes where the Sun is and when it rises, transits and sets: apparent
 geocentric coordinates, topocentric refracted altitude and azimuth, sidereal
@@ -30,6 +41,7 @@ duration  16.1715 h
 
 ## Contents
 
+- [Gallery](#gallery)
 - [Features](#features)
 - [Building](#building)
 - [Command-line tool](#command-line-tool) (a demonstration front end, not the engine)
@@ -59,6 +71,45 @@ duration  16.1715 h
 - [Limitations](#limitations)
 - [References](#references)
 - [License](#license)
+
+---
+
+## Gallery
+
+Every figure in this README is computed by the library and drawn by
+`spp_figures` (see [Accuracy tools](#accuracy-tools)).
+
+**Day length through the year, from the equator to 80° N.** The curves meet
+just above 12 h, a few days before the March equinox and after the September
+one: refraction and the Sun's radius make the day at the equinox slightly
+longer than 12 h (12.10 h at the equator, 12.15 h in Paris). Above the Arctic
+Circle the curves reach the polar day (24 h) and polar night (0 h) plateaus.
+The gaps at the end of polar day are days the solver does not resolve (see
+[Limitations](#limitations)).
+
+![Day length through the year by latitude](docs/images/day_length.svg)
+
+**The Sun's path across the sky over Paris** at the June solstice, the March
+equinox and the December solstice. On these dates solar noon falls a few
+minutes before 12:00 UTC (11:52, 11:58 and 11:49): Paris lies 2.35° east of
+Greenwich, 9 minutes of time, and the equation of time adds or removes a few
+more.
+
+![The Sun's path across the sky over Paris](docs/images/sun_paths.svg)
+
+**The analemma.** The Sun photographed at the same clock time every day traces
+a figure eight. The vertical extent is the change in declination over the year;
+the horizontal swing is the equation of time, from the eccentricity of the
+Earth's orbit and the tilt of its axis.
+
+![The analemma seen from Greenwich](docs/images/analemma.svg)
+
+**Where the Sun rises and sets.** The azimuth of sunrise and sunset over the
+year as spirals, the same view as the interactive `spp_spiral` viewer. In
+Paris, sunrise swings between 51.7° (northeast, June) and 126.1° (southeast,
+December), and sunset between 233.9° and 308.3°.
+
+![Sunrise and sunset azimuth spirals](docs/images/spirals.svg)
 
 ---
 
@@ -120,6 +171,7 @@ CMake options:
 | `SPP_BUILD_APPS` | `ON` | Builds `spp` and, when GLFW/GLEW/GLM are found, `spp_spiral` |
 | `SPP_BUILD_VALIDATION` | `ON` | Builds the `spp_cache_check` accuracy tool |
 | `SPP_BUILD_BENCH` | `OFF` | Builds the `spp_bench` benchmark |
+| `SPP_BUILD_FIGURES` | `OFF` | Builds `spp_figures`, which renders the README figures |
 
 Other CMake projects link the library as `spp::spp`.
 
@@ -248,6 +300,8 @@ public API, which the `spp` executable does not print.
 ```
 spp_spiral YEAR LAT LON [ELEV]
 ```
+
+![Sunrise and sunset azimuth spirals for Paris](docs/images/spirals.svg)
 
 It opens two windows, **sunrise** and **sunset**. In each one, every day of
 the year is a point:
@@ -1372,10 +1426,12 @@ It never changes the public API.
 |---|---|
 | `spp_cache_check` | The Chebyshev cache and direct double evaluation, both against the same series evaluated in 80-bit extended precision, at random instants over 1000 BC–3000 AD, densely inside segments, and on both sides of segment boundaries. The cache passes when it is no further from the truth than direct evaluation |
 | `spp_bench` | Throughput of `sun::apparent`, `events::altitude_deg` and `events::day` over a year × latitude grid |
+| `spp_figures` | Renders the figures in `docs/images/` as SVG from the library's results: daylight and twilight, day length by latitude, analemma, sun paths, azimuth spirals |
 
 ```sh
 ./build/release/spp_cache_check
 cmake --preset release -DSPP_BUILD_BENCH=ON && cmake --build --preset release && ./build/release/spp_bench
+cmake --preset release -DSPP_BUILD_FIGURES=ON && cmake --build --preset release && ./build/release/spp_figures docs/images
 ```
 
 ---
@@ -1390,6 +1446,8 @@ Seasonal++/
 ├── cmake/SppFlags.cmake          compiler flags and floating-point policy
 ├── data/VSOP87D.ear              VSOP87D Earth series (source data)
 ├── tools/vsop_gen.cpp            .ear → exact C++ tables, run at build time
+├── tools/figures.cpp             renders the README figures (SVG)
+├── docs/images/                  README figures
 ├── include/spp/
 │   ├── spp.hpp                   umbrella header
 │   ├── core/                     Time, Instant, calendar, angles, constants, types
@@ -1436,6 +1494,11 @@ Seasonal++/
   distance.
 - **Day classification** samples the altitude 12 h after transit instead of
   finding the exact lower culmination ([§13.2](#132-one-day)).
+- **First day after polar day.** At high latitudes, the day on which the Sun
+  first dips below the horizon can have its only crossing more than 12 h from
+  the transit it is searched around. `events::day` then returns `Normal` with a
+  sunset but no sunrise, and a duration of 0 h. Examples: 70° N on 2026-07-27
+  and 80° N on 2026-08-29.
 - **Rise/set with a raised horizon** (mountains, observer height above
   terrain) is not modelled; elevation only affects parallax.
 

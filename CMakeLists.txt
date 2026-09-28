@@ -14,6 +14,7 @@ option(SPP_NATIVE           "Tune for the build machine (-march=native)"        
 option(SPP_BUILD_APPS       "Build the spp command-line tool and the spp_spiral viewer"                     ON)
 option(SPP_BUILD_VALIDATION "Build the spp_cache_check accuracy tool"                                       ON)
 option(SPP_BUILD_BENCH      "Build the spp_bench benchmark"                                                OFF)
+option(SPP_BUILD_FIGURES    "Build spp_figures, which renders the README figures"                          OFF)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -108,4 +109,8 @@ endif()
 
 if(SPP_BUILD_BENCH)
     spp_add_executable(spp_bench bench/bench_pipeline.cpp)
+endif()
+
+if(SPP_BUILD_FIGURES)
+    spp_add_executable(spp_figures tools/figures.cpp)
 endif()
