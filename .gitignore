@@ -1,5 +1,11 @@
-build/
-.cache/
+# Build output (CMake presets write to build/<preset>/)
+/build/
+
+# clangd index and compilation database
+/.cache/
 compile_commands.json
-.claude/
-.vscode/
+
+# Local editor and tool settings
+/.vscode/
+/.claude/
+*.code-workspace

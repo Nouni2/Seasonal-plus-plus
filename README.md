@@ -115,9 +115,13 @@ CMake options:
 
 | Option | Default | Effect |
 |---|---|---|
-| `SPP_NATIVE` | `OFF` | Adds `-march=native` |
-| `SPP_BUILD_BENCH` | `OFF` | Builds the `spp_bench` benchmark |
 | `SPP_EXACT` | `OFF` | Reference mode, set by the `exact` preset |
+| `SPP_NATIVE` | `OFF` | Adds `-march=native` |
+| `SPP_BUILD_APPS` | `ON` | Builds `spp` and, when GLFW/GLEW/GLM are found, `spp_spiral` |
+| `SPP_BUILD_VALIDATION` | `ON` | Builds the `spp_cache_check` accuracy tool |
+| `SPP_BUILD_BENCH` | `OFF` | Builds the `spp_bench` benchmark |
+
+Other CMake projects link the library as `spp::spp`.
 
 The build first compiles `tools/vsop_gen`, which turns `data/VSOP87D.ear` into
 `build/<preset>/generated/spp/vsop87d_earth_terms.inc` (see
@@ -1381,6 +1385,8 @@ cmake --preset release -DSPP_BUILD_BENCH=ON && cmake --build --preset release &&
 ```
 Seasonal++/
 ├── CMakeLists.txt, CMakePresets.json
+├── README.md, LICENSE
+├── .editorconfig, .gitattributes, .gitignore
 ├── cmake/SppFlags.cmake          compiler flags and floating-point policy
 ├── data/VSOP87D.ear              VSOP87D Earth series (source data)
 ├── tools/vsop_gen.cpp            .ear → exact C++ tables, run at build time
@@ -1458,4 +1464,4 @@ Seasonal++/
 
 ## License
 
-GNU General Public License v3.0 or later.
+GNU General Public License v3.0 or later. See [LICENSE](LICENSE).

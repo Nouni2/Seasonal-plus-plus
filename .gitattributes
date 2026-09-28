@@ -1,0 +1,9 @@
+# Store and check out text files with LF line endings on every platform.
+* text=auto eol=lf
+
+# VSOP87 data: third-party tables, too large to be useful in diffs.
+*.ear text eol=lf -diff linguist-vendored
+
+# Binary files
+*.png binary
+*.jpg binary
