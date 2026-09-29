@@ -102,4 +102,9 @@ double refraction(double geometric_alt_deg, const Atmosphere& atm) {
     return model::saemundsson::apparent_altitude_deg(geometric_alt_deg, atm.pressure_mbar, atm.temp_c);
 }
 
+Horizontal observe(const Equatorial& geocentric, const Observer& obs, double lst_deg, const Atmosphere& atm) {
+    const Horizontal hor = to_horizontal(parallax(geocentric, obs, lst_deg), obs.lat_deg, lst_deg);
+    return {refraction(hor.alt_deg, atm), hor.az_deg};
+}
+
 }  // namespace spp::sky

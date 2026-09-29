@@ -16,4 +16,8 @@ Equatorial parallax(const Equatorial& geocentric, const Observer& obs, double ls
 // Geometric altitude -> apparent (refracted) altitude.
 double refraction(double geometric_alt_deg, const Atmosphere& atm);
 
+// What the observer sees: parallax, horizontal coordinates, then refraction of
+// the altitude. `geocentric` is an apparent geocentric position.
+Horizontal observe(const Equatorial& geocentric, const Observer& obs, double lst_deg, const Atmosphere& atm);
+
 }  // namespace spp::sky

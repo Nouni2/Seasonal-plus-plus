@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "season_color.hpp"
 #include "spp/spp.hpp"
 
 namespace {
@@ -179,21 +180,11 @@ double hours_since(const spp::Time& t, const spp::Time& ref) {
     return (static_cast<double>(t.utc().day - ref.utc().day) + (t.utc().frac - ref.utc().frac)) * 24.0;
 }
 
-// Topocentric position of the Sun, with the altitude refracted.
-spp::Horizontal sun_sky(const spp::Time& t, const spp::Observer& obs) {
-    const auto tt = t.tt();
-    const auto n = spp::earth::nutation(tt);
-    const auto eq = spp::sun::apparent(tt, n);
-    const double lst = spp::earth::lst_deg(t.ut1(), n, obs.lon_deg);
-    const auto hor = spp::sky::to_horizontal(spp::sky::parallax(eq, obs, lst), obs.lat_deg, lst);
-    return {spp::sky::refraction(hor.alt_deg, {}), hor.az_deg};
-}
-
-// Blue around January, orange around July (as in the spp_spiral viewer).
+// The season colour of spp_spiral, as an SVG hex colour.
 std::string season_color(int doy, int days) {
-    const double s = 0.5 - 0.5 * std::cos(2.0 * spp::pi * (doy - 1) / days);
-    const auto mix = [s](double a, double b) { return static_cast<int>(std::lround(255.0 * (a + (b - a) * s))); };
-    return std::format("#{:02x}{:02x}{:02x}", mix(0.30, 1.00), mix(0.60, 0.62), mix(1.00, 0.20));
+    const auto [r, g, b] = common::season_rgb(doy, days);
+    const auto byte = [](double v) { return static_cast<int>(std::lround(255.0 * v)); };
+    return std::format("#{:02x}{:02x}{:02x}", byte(r), byte(g), byte(b));
 }
 
 // ---------------------------------------------------------------------------
@@ -306,21 +297,11 @@ void render_day_length(const std::filesystem::path& dir) {
 
     for (std::size_t k = 0; k < lats.size(); ++k) {
         const spp::Observer obs{lats[k], 0.0, 0.0};
-        // A normal day with a missing rise or set has no defined length
-        // (see Limitations in the README): leave a gap instead of plotting 0 h.
-        std::vector<Points> runs(1);
-        for (int i = 0; i < days; ++i) {
-            const auto d = spp::events::day(y.dates[static_cast<std::size_t>(i)], obs);
-            if (d.type == spp::events::DayType::Normal && (!d.rise || !d.set)) {
-                runs.emplace_back();
-                continue;
-            }
-            runs.back().push_back({i + 1.0, d.duration_hours});
-        }
-        for (const auto& run : runs)
-            if (run.size() > 1)
-                svg.add(R"(<polyline points="{}" fill="none" stroke="{}" stroke-width="2" stroke-linejoin="round"/>)",
-                        polyline(run, f), colors[k]);
+        Points pts;
+        for (int i = 0; i < days; ++i)
+            pts.push_back({i + 1.0, spp::events::day(y.dates[static_cast<std::size_t>(i)], obs).duration_hours});
+        svg.add(R"(<polyline points="{}" fill="none" stroke="{}" stroke-width="2" stroke-linejoin="round"/>)",
+                polyline(pts, f), colors[k]);
         const double ly = f.top + 14 + 26.0 * static_cast<double>(k);
         svg.add(R"(<line x1="{:.1f}" y1="{:.1f}" x2="{:.1f}" y2="{:.1f}" stroke="{}" stroke-width="3"/>)",
                 f.right() + 28, ly - 4, f.right() + 52, ly - 4, colors[k]);
@@ -348,7 +329,7 @@ void render_analemma(const std::filesystem::path& dir) {
     y_grid(svg, f, 10, 65, 5, "°");
 
     std::vector<spp::Horizontal> sky;
-    for (const auto& d : y.dates) sky.push_back(sun_sky(spp::Time::from_utc(d.year, d.month, d.day, 12), kGreenwich));
+    for (const auto& d : y.dates) sky.push_back(spp::sun::horizontal(spp::Time::from_utc(d.year, d.month, d.day, 12), kGreenwich));
     for (int i = 0; i < days; ++i) {
         const auto& h = sky[static_cast<std::size_t>(i)];
         svg.add(R"(<circle cx="{:.1f}" cy="{:.1f}" r="3.2" fill="{}"/>)", f.x(h.az_deg), f.y(h.alt_deg),
@@ -363,7 +344,7 @@ void render_analemma(const std::filesystem::path& dir) {
     };
     for (const auto& m : std::array<Mark, 4>{{{3, 20, "Mar 20", 12}, {6, 21, "Jun 21", 12}, {9, 23, "Sep 23", -12},
                                               {12, 21, "Dec 21", 12}}}) {
-        const auto h = sun_sky(spp::Time::from_utc(kYear, m.month, m.day, 12), kGreenwich);
+        const auto h = spp::sun::horizontal(spp::Time::from_utc(kYear, m.month, m.day, 12), kGreenwich);
         svg.add(R"(<circle cx="{:.1f}" cy="{:.1f}" r="5.5" fill="none" stroke="{}" stroke-width="1.5"/>)",
                 f.x(h.az_deg), f.y(h.alt_deg), kInk);
         svg.add(R"(<text x="{:.1f}" y="{:.1f}" font-size="12" fill="{}" text-anchor="{}">{}</text>)",
@@ -405,13 +386,13 @@ void render_sun_paths(const std::filesystem::path& dir) {
         const auto midnight = spp::Time::from_utc(kYear, p.month, p.day);
         Points pts;
         for (int m = 0; m <= 24 * 60; m += 4) {
-            const auto h = sun_sky(midnight.shifted(m / 1440.0), kParis);
+            const auto h = spp::sun::horizontal(midnight.shifted(m / 1440.0), kParis);
             if (h.alt_deg > -2.0) pts.push_back({h.az_deg, h.alt_deg});
         }
         svg.add(R"(<polyline points="{}" fill="none" stroke="{}" stroke-width="2.4" stroke-linejoin="round"/>)",
                 polyline(pts, f), p.color);
         for (int hour = 0; hour < 24; ++hour) {
-            const auto h = sun_sky(midnight.shifted(hour / 24.0), kParis);
+            const auto h = spp::sun::horizontal(midnight.shifted(hour / 24.0), kParis);
             if (h.alt_deg < 0.0) continue;
             svg.add(R"(<circle cx="{:.1f}" cy="{:.1f}" r="3.4" fill="#0d1117" stroke="{}" stroke-width="1.8"/>)",
                     f.x(h.az_deg), f.y(h.alt_deg), p.color);
@@ -471,8 +452,9 @@ struct Camera {
     double depth(Vec3 p) const { return dot(p - target, forward); }
 };
 
-struct Segment {
-    Vec3 a, b;
+// A short polyline drawn with one colour and one depth fade.
+struct Piece {
+    std::vector<Vec3> pts;
     std::string color;
     double width;
     double base_opacity;
@@ -482,38 +464,55 @@ void spiral_panel(Svg& svg, const Camera& cam, const std::vector<std::pair<int, 
                   const Year& y, const char* title) {
     const double top = kHeight * (days - 1) / std::max(days - 1, 1);
     const auto height = [&](int doy) { return kHeight * (doy - 1) / std::max(days - 1, 1); };
-    std::vector<Segment> segs;
+    std::vector<Piece> pieces;
 
-    constexpr int n = 96;
+    // Rings: 96 segments each, drawn as 12 pieces of 8 so the fade still
+    // follows depth around the ring.
+    constexpr int n = 96, per_piece = 8;
     auto ring = [&](double h, const char* color, double opacity) {
-        for (int i = 0; i < n; ++i)
-            segs.push_back({cyl(360.0 * i / n, h), cyl(360.0 * (i + 1) / n, h), color, 1.0, opacity});
+        for (int i = 0; i < n; i += per_piece) {
+            Piece p{{}, color, 1.0, opacity};
+            for (int k = i; k <= i + per_piece; ++k) p.pts.push_back(cyl(360.0 * k / n, h));
+            pieces.push_back(std::move(p));
+        }
     };
     ring(0.0, "#6b7280", 0.9);
     ring(top, "#6b7280", 0.9);
     for (std::size_t m = 1; m < 12; ++m) ring(height(y.month_start[m]), "#3a4150", 0.8);
     for (int az = 0; az < 360; az += 90) {
         const char* color = az == 0 ? "#d94c4c" : "#4b5563";
-        segs.push_back({cyl(az, 0.0), cyl(az, top), color, 1.0, 0.9});
-        segs.push_back({{0.0, 0.0, 0.0}, cyl(az, 0.0, 1.15), color, 1.2, 0.9});
+        pieces.push_back({{cyl(az, 0.0), cyl(az, top)}, color, 1.0, 0.9});
+        pieces.push_back({{{0.0, 0.0, 0.0}, cyl(az, 0.0, 1.15)}, color, 1.2, 0.9});
     }
-    segs.push_back({{0.0, 0.0, 0.0}, {0.0, top, 0.0}, "#6b7280", 1.0, 0.9});
-    for (std::size_t i = 1; i < samples.size(); ++i) {
-        if (samples[i].first != samples[i - 1].first + 1) continue;
-        segs.push_back({cyl(samples[i - 1].second, height(samples[i - 1].first)),
-                        cyl(samples[i].second, height(samples[i].first)), season_color(samples[i].first, days), 2.6,
-                        1.0});
+    pieces.push_back({{{0.0, 0.0, 0.0}, {0.0, top, 0.0}}, "#6b7280", 1.0, 0.9});
+
+    // The spiral: pieces of up to 4 consecutive days, coloured by their middle day.
+    for (std::size_t i = 0; i + 1 < samples.size();) {
+        Piece p{{cyl(samples[i].second, height(samples[i].first))}, "", 2.6, 1.0};
+        std::size_t j = i;
+        while (j + 1 < samples.size() && j - i < 4 && samples[j + 1].first == samples[j].first + 1) {
+            ++j;
+            p.pts.push_back(cyl(samples[j].second, height(samples[j].first)));
+        }
+        if (j == i) {   // gap in the days: nothing to join
+            ++i;
+            continue;
+        }
+        p.color = season_color(samples[(i + j) / 2].first, days);
+        pieces.push_back(std::move(p));
+        i = j;
     }
 
-    // Painter's order, far to near; farther segments fade.
-    std::ranges::sort(segs, [&](const Segment& s, const Segment& t) {
-        return cam.depth(s.a) + cam.depth(s.b) > cam.depth(t.a) + cam.depth(t.b);
-    });
-    for (const auto& s : segs) {
-        const double d = (cam.depth(s.a) + cam.depth(s.b)) / 2.0;
-        const double fade = std::clamp(0.62 - 0.28 * d, 0.3, 1.0);
-        svg.add(R"(<line x1="{:.1f}" y1="{:.1f}" x2="{:.1f}" y2="{:.1f}" stroke="{}" stroke-width="{:g}" stroke-linecap="round" opacity="{:.2f}"/>)",
-                cam.sx(s.a), cam.sy(s.a), cam.sx(s.b), cam.sy(s.b), s.color, s.width, s.base_opacity * fade);
+    // Painter's order, far to near; farther pieces fade.
+    const auto depth = [&](const Piece& p) { return (cam.depth(p.pts.front()) + cam.depth(p.pts.back())) / 2.0; };
+    std::ranges::sort(pieces, [&](const Piece& a, const Piece& b) { return depth(a) > depth(b); });
+    for (const auto& p : pieces) {
+        std::string pts;
+        for (const Vec3& v : p.pts) pts += std::format("{:.1f},{:.1f} ", cam.sx(v), cam.sy(v));
+        const double fade = std::clamp(0.62 - 0.28 * depth(p), 0.3, 1.0);
+        // Spiral pieces meet end to end: flat caps, so translucent ends don't overlap.
+        svg.add(R"(<polyline points="{}" fill="none" stroke="{}" stroke-width="{:g}" stroke-linecap="{}" stroke-linejoin="round" opacity="{:.2f}"/>)",
+                pts, p.color, p.width, p.width > 2.0 ? "butt" : "round", p.base_opacity * fade);
     }
 
     for (auto [c, az] : std::array<std::pair<const char*, int>, 4>{{{"N", 0}, {"E", 90}, {"S", 180}, {"W", 270}}}) {
@@ -532,8 +531,8 @@ void render_spirals(const std::filesystem::path& dir) {
     std::vector<std::pair<int, double>> rise, set;
     for (int i = 0; i < days; ++i) {
         const auto d = spp::events::day(y.dates[static_cast<std::size_t>(i)], kParis);
-        if (d.rise) rise.push_back({i + 1, sun_sky(*d.rise, kParis).az_deg});
-        if (d.set) set.push_back({i + 1, sun_sky(*d.set, kParis).az_deg});
+        if (d.rise) rise.push_back({i + 1, spp::sun::horizontal(*d.rise, kParis).az_deg});
+        if (d.set) set.push_back({i + 1, spp::sun::horizontal(*d.set, kParis).az_deg});
     }
 
     Svg svg(920, 640);
@@ -604,7 +603,7 @@ void render_banner(const std::filesystem::path& dir) {
         const auto midnight = spp::Time::from_utc(kYear, p.month, p.day);
         Points pts;
         for (int m = 0; m <= 24 * 60; m += 3) {
-            const auto h = sun_sky(midnight.shifted(m / 1440.0), kParis);
+            const auto h = spp::sun::horizontal(midnight.shifted(m / 1440.0), kParis);
             if (h.alt_deg > -1.0 && h.az_deg > 40.0 && h.az_deg < 320.0) pts.push_back({h.az_deg, h.alt_deg});
         }
         svg.add(R"(<polyline points="{}" fill="none" stroke="{}" stroke-width="12" stroke-opacity="0.13" stroke-linecap="round" stroke-linejoin="round"/>)",
@@ -613,7 +612,7 @@ void render_banner(const std::filesystem::path& dir) {
                 polyline(pts, f), p.color);
     }
     // The Sun itself, on the June path in the late afternoon.
-    const auto sun = sun_sky(spp::Time::from_utc(kYear, 6, 21, 16, 30), kParis);
+    const auto sun = spp::sun::horizontal(spp::Time::from_utc(kYear, 6, 21, 16, 30), kParis);
     const double sx = f.x(sun.az_deg), sy = f.y(sun.alt_deg);
     svg.add(R"svg(<circle cx="{:.1f}" cy="{:.1f}" r="70" fill="url(#glow)"/>)svg", sx, sy);
     svg.add(R"(<circle cx="{:.1f}" cy="{:.1f}" r="11" fill="#fff4d1"/>)", sx, sy);

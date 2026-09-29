@@ -116,11 +116,9 @@ int cmd_sun(const std::vector<std::string_view>& a, const Options& o) {
 
     if (a.size() >= 4) {
         const auto obs = parse_observer(a, 2);
-        const double lst = spp::earth::lst_deg(t.ut1(), n, obs.lon_deg);
-        const auto topo = spp::sky::parallax(eq, obs, lst);
-        const auto hor = spp::sky::to_horizontal(topo, obs.lat_deg, lst);
-        const double alt = spp::sky::refraction(hor.alt_deg, o.atm);
-        std::println("horizontal  alt {:.6f}° (geometric {:.6f}°)  az {:.6f}°", alt, hor.alt_deg, hor.az_deg);
+        const auto hor = spp::sun::horizontal(t, obs, o.atm);
+        const auto geo = spp::sun::horizontal(t, obs, {.refraction = false});
+        std::println("horizontal  alt {:.6f}° (geometric {:.6f}°)  az {:.6f}°", hor.alt_deg, geo.alt_deg, hor.az_deg);
     }
     return 0;
 }

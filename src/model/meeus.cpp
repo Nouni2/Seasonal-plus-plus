@@ -57,18 +57,9 @@ CalendarDay calendar_from_jd(std::int64_t day, double frac) {
     return {year, month, static_cast<int>(day_floor), day_with_frac - day_floor};
 }
 
-double gmst_deg(double D) {
-    // Formula 12.4 (IAU 1982); D and T are counted on UT1.
-    constexpr double a = 280.46061837;
-    constexpr double b = 360.98564736629;
-    constexpr double c = 0.000387933;
-    constexpr double d = -1.0 / 38710000.0;
-
-    const double T = D / days_per_century;
-    return norm360(a + b * D + c * T * T + d * T * T * T);
-}
-
 double gmst_deg(std::int64_t days, double frac) {
+    // Formula 12.4 (IAU 1982); D = days + frac and T are counted on UT1:
+    // θ0 = 280.46061837 + 360.98564736629 D + 0.000387933 T² - T³/38710000.
     constexpr double a = 280.46061837;
     constexpr double c = 0.000387933;
     constexpr double d = -1.0 / 38710000.0;

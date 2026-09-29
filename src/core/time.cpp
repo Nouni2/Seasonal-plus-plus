@@ -18,7 +18,7 @@ Instant<Scale> renormalized(std::int64_t day, double frac) {
         day += extra;
         frac -= static_cast<double>(extra);
     } else if (frac < 0.0) {
-        const auto extra = static_cast<std::int64_t>(std::abs(frac)) + 1;
+        const auto extra = static_cast<std::int64_t>(std::ceil(-frac));
         day -= extra;
         frac += static_cast<double>(extra);
     }

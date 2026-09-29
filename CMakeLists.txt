@@ -9,7 +9,6 @@ project(Spp
 # ------------------------------------------------------------------------------
 # Options
 # ------------------------------------------------------------------------------
-option(SPP_EXACT            "Reference mode: direct series evaluation, textbook formulas (30-40x slower)" OFF)
 option(SPP_NATIVE           "Tune for the build machine (-march=native)"                                   OFF)
 option(SPP_BUILD_APPS       "Build the spp command-line tool and the spp_spiral viewer"                     ON)
 option(SPP_BUILD_VALIDATION "Build the spp_cache_check accuracy tool"                                       ON)
@@ -68,9 +67,6 @@ target_include_directories(spp
     PRIVATE ${SPP_GENERATED_DIR}
 )
 spp_apply_flags(spp)
-if(SPP_EXACT)
-    target_compile_definitions(spp PUBLIC SPP_EXACT)
-endif()
 
 # ------------------------------------------------------------------------------
 # Executables
@@ -96,6 +92,7 @@ if(SPP_BUILD_APPS)
     if(TARGET glfw AND TARGET GLEW::glew AND TARGET glm::glm AND TARGET OpenGL::GL)
         spp_add_executable(spp_spiral apps/spiral/main.cpp)
         target_link_libraries(spp_spiral PRIVATE glfw GLEW::glew glm::glm OpenGL::GL)
+        target_include_directories(spp_spiral PRIVATE ${PROJECT_SOURCE_DIR}/apps/common)
     else()
         message(STATUS "spp_spiral not built: GLFW, GLEW, GLM or OpenGL not found")
     endif()
@@ -103,14 +100,15 @@ endif()
 
 if(SPP_BUILD_VALIDATION)
     # Uses internal headers (src/) and the generated tables.
-    spp_add_executable(spp_cache_check validation/cache_check.cpp)
+    spp_add_executable(spp_cache_check tools/cache_check.cpp)
     target_include_directories(spp_cache_check PRIVATE ${PROJECT_SOURCE_DIR}/src ${SPP_GENERATED_DIR})
 endif()
 
 if(SPP_BUILD_BENCH)
-    spp_add_executable(spp_bench bench/bench_pipeline.cpp)
+    spp_add_executable(spp_bench tools/bench.cpp)
 endif()
 
 if(SPP_BUILD_FIGURES)
     spp_add_executable(spp_figures tools/figures.cpp)
+    target_include_directories(spp_figures PRIVATE ${PROJECT_SOURCE_DIR}/apps/common)
 endif()

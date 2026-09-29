@@ -1,8 +1,6 @@
-// Two solvers share the altitude pipeline:
-//   - default: analytic first guess, tight bracket, Illinois refinement to
-//     SolverConfig::time_tolerance_s (1 µs), transit refined to ~1e-7 s;
-//   - SPP_EXACT (reference mode): hourly scan from transit, then
-//     secant/bisection to 0.001 deg of altitude.
+// Solar events: transit by Newton steps on the hour angle; crossings from an
+// analytic first guess, a tight bracket and Illinois refinement to
+// SolverConfig::time_tolerance_s (1 µs).
 
 #include "spp/events.hpp"
 
@@ -33,10 +31,7 @@ Geocentric geocentric(const Time& t) {
 }
 
 double altitude_from(const Geocentric& g, const Observer& obs, const Atmosphere& atm) {
-    const double lst = earth::lst_deg(g.ut1, g.nutation, obs.lon_deg);
-    const Equatorial topo = sky::parallax(g.sun, obs, lst);
-    const Horizontal hor = sky::to_horizontal(topo, obs.lat_deg, lst);
-    return sky::refraction(hor.alt_deg, atm);
+    return sky::observe(g.sun, obs, earth::lst_deg(g.ut1, g.nutation, obs.lon_deg), atm).alt_deg;
 }
 
 double hour_angle_deg(const Geocentric& g, double lon_east_deg) {
@@ -53,91 +48,14 @@ Time approx_noon(const CivilDate& date, double lon_east_deg, double dut1_s) {
     return Time::from_utc(date.year, date.month, date.day, h, m, s, dut1_s);
 }
 
-double duration_hours(const std::optional<Time>& rise, const std::optional<Time>& set) {
-    if (!rise || !set) return 0.0;
-    const auto r = rise->utc();
-    const auto st = set->utc();
-    return (static_cast<double>(st.day - r.day) + (st.frac - r.frac)) * 24.0;
+// Time above the horizon within the 24 h centered on transit. A missing rise
+// (or set) means the Sun is already up at the start (or still up at the end)
+// of that window, which happens next to polar day.
+double duration_hours(const Time& transit, const std::optional<Time>& rise, const std::optional<Time>& set) {
+    const auto start = (rise ? *rise : transit.shifted(-0.5)).utc();
+    const auto end = (set ? *set : transit.shifted(0.5)).utc();
+    return (static_cast<double>(end.day - start.day) + (end.frac - start.frac)) * 24.0;
 }
-
-#ifdef SPP_EXACT
-
-// ---------------------------------------------------------------------------
-// Reference-mode solver
-// ---------------------------------------------------------------------------
-
-constexpr double kEpsilonDeg = 0.001;
-constexpr int kMaxIter = 30;
-
-Time transit_impl(const Time& approx, double lon_east_deg) {
-    Time current = approx;
-    for (int i = 0; i < 3; ++i) {
-        const double H = hour_angle_deg(geocentric(current), lon_east_deg);
-        if (std::abs(H) < 0.001) break;
-        current = Time::from_jd(current.utc().day, current.utc().frac - H / 360.0, current.dut1());
-    }
-    return current;
-}
-
-std::optional<Time> crossing_impl(const Time& transit_time, const Observer& obs, const Atmosphere& atm,
-                                  double target_alt_deg, Direction dir) {
-    const auto base = transit_time.utc();
-    const double dut1 = transit_time.dut1();
-    auto at = [&](double frac) { return Time::from_jd(base.day, frac, dut1); };
-    auto f = [&](double frac) { return altitude_deg(at(frac), obs, atm) - target_alt_deg; };
-
-    // 1. Bracket by scanning outward from transit in 1 h steps (max 12 h).
-    double frac_above = base.frac;
-    double val_above = f(frac_above);
-    if (val_above < 0.0) return std::nullopt;
-
-    std::optional<double> frac_below;
-    double val_below = 0.0;
-    const double step = static_cast<int>(dir) * (1.0 / 24.0);
-    for (int i = 1; i <= 12; ++i) {
-        const double frac_i = base.frac + i * step;
-        const double val_i = f(frac_i);
-        if (val_i < 0.0) {
-            frac_below = frac_i;
-            val_below = val_i;
-            break;
-        }
-        frac_above = frac_i;
-        val_above = val_i;
-    }
-    if (!frac_below) return std::nullopt;
-
-    // 2. Secant/bisection hybrid; the bracket is kept at every step.
-    double lo = frac_above, f_lo = val_above;
-    double hi = *frac_below, f_hi = val_below;
-    for (int iter = 0; iter < kMaxIter; ++iter) {
-        const double denom = f_hi - f_lo;
-        double cand = std::abs(denom) > 1e-12 ? hi - f_hi * (hi - lo) / denom : 0.5 * (lo + hi);
-
-        const double lo_b = lo < hi ? lo : hi;
-        const double hi_b = lo < hi ? hi : lo;
-        if (!(lo_b < cand && cand < hi_b)) cand = 0.5 * (lo + hi);
-
-        const double f_cand = f(cand);
-        if (std::abs(f_cand) < kEpsilonDeg) return at(cand);
-
-        if (f_cand > 0.0) {
-            lo = cand;
-            f_lo = f_cand;
-        } else {
-            hi = cand;
-            f_hi = f_cand;
-        }
-        if (std::abs(hi - lo) < 1.0 / 86400.0 / 10.0) return at(0.5 * (lo + hi));
-    }
-    return std::nullopt;
-}
-
-#else
-
-// ---------------------------------------------------------------------------
-// Default solver
-// ---------------------------------------------------------------------------
 
 struct Transit {
     Time time;
@@ -146,7 +64,7 @@ struct Transit {
 
 Transit transit_impl(const Time& approx, double lon_east_deg, const SolverConfig& cfg) {
     // Newton on the hour angle: it advances ~360° per day, so each step
-    // shrinks the error ~1000x. 1e-9° of hour angle is ~2e-7 s.
+    // shrinks the error ~3000x. 1e-9° of hour angle is ~2e-7 s.
     Time current = approx;
     Geocentric g = geocentric(current);
     double H = hour_angle_deg(g, lon_east_deg);
@@ -269,40 +187,11 @@ std::optional<Time> crossing_impl(const Transit& tr, double alt_transit, const O
     return at(0.5 * (lo + hi));
 }
 
-#endif
-
 }  // namespace
 
 double altitude_deg(const Time& t, const Observer& obs, const Atmosphere& atm) {
     return altitude_from(geocentric(t), obs, atm);
 }
-
-#ifdef SPP_EXACT
-
-Time transit(const Time& approx, double lon_east_deg, const SolverConfig&) {
-    return transit_impl(approx, lon_east_deg);
-}
-
-std::optional<Time> crossing(const Time& transit_time, const Observer& obs, const Atmosphere& atm,
-                             double target_alt_deg, Direction dir, const SolverConfig&) {
-    return crossing_impl(transit_time, obs, atm, target_alt_deg, dir);
-}
-
-Day day(const CivilDate& date, const Observer& obs, const Atmosphere& atm, double dut1_s,
-        const SolverConfig&) {
-    const Time t_transit = transit_impl(approx_noon(date, obs.lon_deg, dut1_s), obs.lon_deg);
-
-    const double alt_noon = altitude_deg(t_transit, obs, atm);
-    const double alt_midnight = altitude_deg(t_transit.shifted(0.5), obs, atm);
-    if (alt_noon < upper_limb_deg) return {date, DayType::PolarNight, t_transit, {}, {}, 0.0};
-    if (alt_midnight > upper_limb_deg) return {date, DayType::PolarDay, t_transit, {}, {}, 24.0};
-
-    auto rise = crossing_impl(t_transit, obs, atm, upper_limb_deg, Direction::Before);
-    auto set = crossing_impl(t_transit, obs, atm, upper_limb_deg, Direction::After);
-    return {date, DayType::Normal, t_transit, rise, set, duration_hours(rise, set)};
-}
-
-#else
 
 Time transit(const Time& approx, double lon_east_deg, const SolverConfig& cfg) {
     return transit_impl(approx, lon_east_deg, cfg).time;
@@ -318,17 +207,18 @@ Day day(const CivilDate& date, const Observer& obs, const Atmosphere& atm, doubl
         const SolverConfig& cfg) {
     const Transit tr = transit_impl(approx_noon(date, obs.lon_deg, dut1_s), obs.lon_deg, cfg);
 
-    // Classify from the altitude at transit and 12 h later.
+    // Classify from the altitude at transit and at both lower culminations
+    // around it (approximated as 12 h before and after).
     const double alt_noon = altitude_from(tr.state, obs, atm);
-    const double alt_midnight = altitude_deg(tr.time.shifted(0.5), obs, atm);
     if (alt_noon < upper_limb_deg) return {date, DayType::PolarNight, tr.time, {}, {}, 0.0};
-    if (alt_midnight > upper_limb_deg) return {date, DayType::PolarDay, tr.time, {}, {}, 24.0};
+    const double alt_before = altitude_deg(tr.time.shifted(-0.5), obs, atm);
+    const double alt_after = altitude_deg(tr.time.shifted(0.5), obs, atm);
+    if (alt_before > upper_limb_deg && alt_after > upper_limb_deg)
+        return {date, DayType::PolarDay, tr.time, {}, {}, 24.0};
 
     auto rise = crossing_impl(tr, alt_noon, obs, atm, upper_limb_deg, Direction::Before, cfg);
     auto set = crossing_impl(tr, alt_noon, obs, atm, upper_limb_deg, Direction::After, cfg);
-    return {date, DayType::Normal, tr.time, rise, set, duration_hours(rise, set)};
+    return {date, DayType::Normal, tr.time, rise, set, duration_hours(tr.time, rise, set)};
 }
-
-#endif
 
 }  // namespace spp::events

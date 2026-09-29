@@ -3,7 +3,3 @@
 
 # VSOP87 data: third-party tables, too large to be useful in diffs.
 *.ear text eol=lf -diff linguist-vendored
-
-# Binary files
-*.png binary
-*.jpg binary

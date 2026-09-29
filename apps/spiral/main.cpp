@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 
+#include "season_color.hpp"
 #include "spp/spp.hpp"
 
 namespace {
@@ -53,15 +54,6 @@ struct YearData {
     std::vector<Sample> rise, set;
 };
 
-// Topocentric azimuth of the Sun at an instant (refraction changes altitude only).
-double azimuth_at(const spp::Time& t, const spp::Observer& obs) {
-    const auto tt = t.tt();
-    const auto n = spp::earth::nutation(tt);
-    const auto eq = spp::sun::apparent(tt, n);
-    const double lst = spp::earth::lst_deg(t.ut1(), n, obs.lon_deg);
-    return spp::sky::to_horizontal(spp::sky::parallax(eq, obs, lst), obs.lat_deg, lst).az_deg;
-}
-
 YearData compute(int year, const spp::Observer& obs) {
     YearData data;
     const auto jan1 = spp::Time::from_utc(year, 1, 1);
@@ -74,8 +66,8 @@ YearData compute(int year, const spp::Observer& obs) {
         if (c.year != year) break;
         const int doy = ++data.days;
         const auto day = spp::events::day(c.date(), obs);
-        if (day.rise) data.rise.push_back({doy, c.date(), azimuth_at(*day.rise, obs)});
-        if (day.set) data.set.push_back({doy, c.date(), azimuth_at(*day.set, obs)});
+        if (day.rise) data.rise.push_back({doy, c.date(), spp::sun::horizontal(*day.rise, obs).az_deg});
+        if (day.set) data.set.push_back({doy, c.date(), spp::sun::horizontal(*day.set, obs).az_deg});
     }
     return data;
 }
@@ -113,10 +105,9 @@ float height(int doy, int days) {
     return kHeight * static_cast<float>(doy - 1) / static_cast<float>(std::max(days - 1, 1));
 }
 
-// Blue around January, orange around July.
 glm::vec3 season_color(int doy, int days) {
-    const float s = 0.5f - 0.5f * std::cos(2.0f * kPi * static_cast<float>(doy - 1) / static_cast<float>(days));
-    return glm::mix(glm::vec3(0.30f, 0.60f, 1.00f), glm::vec3(1.00f, 0.62f, 0.20f), s);
+    const auto [r, g, b] = common::season_rgb(doy, days);
+    return {static_cast<float>(r), static_cast<float>(g), static_cast<float>(b)};
 }
 
 const glm::vec3 kNorth(0.85f, 0.30f, 0.30f);

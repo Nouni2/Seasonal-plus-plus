@@ -2,7 +2,6 @@
 
 #include <cmath>
 
-#include "build_mode.hpp"
 #include "earth_state.hpp"
 #include "spp/core/angles.hpp"
 #include "spp/model/laskar.hpp"
@@ -25,10 +24,7 @@ double mean_obliquity_deg(Instant<TT> t) {
 
 double delta_t(const Time& t) { return t.delta_t(); }
 
-double gmst_deg(Instant<UT1> t) {
-    if constexpr (detail::kExact) return model::meeus::gmst_deg(t.days_since_j2000());
-    return model::meeus::gmst_deg(t.day - jd_j2000_day, t.frac);
-}
+double gmst_deg(Instant<UT1> t) { return model::meeus::gmst_deg(t.day - jd_j2000_day, t.frac); }
 
 double equation_of_equinoxes_deg(const Nutation& n) {
     return n.dpsi_deg * std::cos(n.true_obliquity_deg * deg2rad);

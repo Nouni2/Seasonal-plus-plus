@@ -37,9 +37,9 @@ match it to within double-precision rounding.
 $ spp day 2026-06-21 48.8566 2.3522 35
 type      NORMAL
 transit   2026-06-21T11:52:24Z
-sunrise   2026-06-21T03:47:16Z
-sunset    2026-06-21T19:57:33Z
-duration  16.1715 h
+sunrise   2026-06-21T03:46:28Z
+sunset    2026-06-21T19:58:21Z
+duration  16.1981 h
 ```
 
 ---
@@ -70,7 +70,6 @@ duration  16.1715 h
 - [Numerical methods](#numerical-methods)
 - [Accuracy](#accuracy)
 - [Performance](#performance)
-- [Build modes](#build-modes)
 - [Accuracy tools](#accuracy-tools)
 - [Project layout](#project-layout)
 - [Limitations](#limitations)
@@ -95,10 +94,9 @@ horizon.
 **Day length through the year, from the equator to 80° N.** The curves meet
 just above 12 h, a few days before the March equinox and after the September
 one: refraction and the Sun's radius make the day at the equinox slightly
-longer than 12 h (12.10 h at the equator, 12.15 h in Paris). Above the Arctic
-Circle the curves reach the polar day (24 h) and polar night (0 h) plateaus.
-The gaps at the end of polar day are days the solver does not resolve (see
-[Limitations](#limitations)).
+longer than 12 h (12.12 h at the equator, 12.17 h in Paris on 20 March).
+Above the Arctic Circle the curves reach the polar day (24 h) and polar night
+(0 h) plateaus.
 
 ![Day length through the year by latitude](docs/images/day_length.svg)
 
@@ -119,8 +117,8 @@ Earth's orbit and the tilt of its axis.
 
 **Where the Sun rises and sets.** The azimuth of sunrise and sunset over the
 year as spirals, the same view as the interactive `spp_spiral` viewer. In
-Paris, sunrise swings between 51.7° (northeast, June) and 126.1° (southeast,
-December), and sunset between 233.9° and 308.3°.
+Paris, sunrise swings between 51.5° (northeast, June) and 125.9° (southeast,
+December), and sunset between 234.1° and 308.5°.
 
 ![Sunrise and sunset azimuth spirals](docs/images/spirals.svg)
 
@@ -171,15 +169,13 @@ cmake --build --preset release
 
 | Preset | Output | Purpose |
 |---|---|---|
-| `release` | `build/release/` | Optimized, the default mode |
+| `release` | `build/release/` | Optimized |
 | `debug` | `build/debug/` | Debug information, no optimization |
-| `exact` | `build/exact/` | Reference mode (see [Build modes](#build-modes)) |
 
 CMake options:
 
 | Option | Default | Effect |
 |---|---|---|
-| `SPP_EXACT` | `OFF` | Reference mode, set by the `exact` preset |
 | `SPP_NATIVE` | `OFF` | Adds `-march=native` |
 | `SPP_BUILD_APPS` | `ON` | Builds `spp` and, when GLFW/GLEW/GLM are found, `spp_spiral` |
 | `SPP_BUILD_VALIDATION` | `ON` | Builds the `spp_cache_check` accuracy tool |
@@ -259,7 +255,7 @@ ecliptic    λ 0.00007180°  β 0.00009035°  R 0.995917594 AU
 equatorial  α 0.00002994° (0.00000200 h)  δ 0.00011145°
 nutation    Δψ 6.2175"  Δε 9.1309"  ε 23.43841881°
 sidereal    GMST 39.64780049°  GAST 39.64938507°
-horizontal  alt 29.298636° (geometric 29.268708°)  az 230.093725°
+horizontal  alt 29.298672° (geometric 29.268708°)  az 230.093725°
 ```
 
 Without a location, only the geocentric lines are printed.
@@ -283,9 +279,9 @@ Events are reported in UTC. For Sydney, sunrise falls on the previous UTC date:
 $ spp day 2026-12-21 -33.8688 151.2093 58
 type      NORMAL
 transit   2026-12-21T01:53:01Z
-sunrise   2026-12-20T18:40:52Z
-sunset    2026-12-21T09:05:11Z
-duration  14.4051 h
+sunrise   2026-12-20T18:40:18Z
+sunset    2026-12-21T09:05:45Z
+duration  14.4240 h
 ```
 
 ### `spp year`
@@ -293,8 +289,8 @@ duration  14.4051 h
 ```
 $ spp year 2026 48.8566 2.3522
 date,type,transit_utc,sunrise_utc,sunset_utc,duration_h
-2026-01-01,NORMAL,11:54:09,07:44:22,16:04:08,8.329466
-2026-01-02,NORMAL,11:54:37,07:44:18,16:05:08,8.347235
+2026-01-01,NORMAL,11:54:09,07:43:36,16:04:54,8.354994
+2026-01-02,NORMAL,11:54:37,07:43:32,16:05:54,8.372716
 ...
 ```
 
@@ -344,9 +340,9 @@ the year is a point:
 How each azimuth is computed:
 
 1. `events::day` gives the sunrise and sunset instants.
-2. At each instant, `sun::apparent` gives the Sun's apparent position.
-3. `sky::parallax` and `sky::to_horizontal` turn it into the topocentric
-   azimuth, with the same nutation and sidereal time.
+2. At each instant, `sun::horizontal` gives the Sun's topocentric azimuth: the
+   apparent place, sidereal time, parallax and horizontal coordinates, with the
+   same nutation throughout.
 
 Refraction changes only the altitude, not the azimuth.
 
@@ -355,6 +351,8 @@ Refraction changes only the altitude, not the azimuth.
 ## Library
 
 Link against the `spp` target and include `spp/spp.hpp`, or individual headers.
+The library is C++20; this example prints with `std::println`, which needs
+C++23.
 
 ```cpp
 #include <print>
@@ -369,13 +367,16 @@ int main() {
     const spp::Equatorial eq = spp::sun::apparent(t.tt());
     std::println("RA {:.6f} h  Dec {:+.6f} deg", eq.ra_hours(), eq.dec_deg);
 
-    // Topocentric, refracted altitude at the observer.
-    std::println("altitude {:+.6f} deg", spp::events::altitude_deg(t, paris, {}));
+    // The Sun in the observer's sky: refracted altitude and azimuth.
+    const spp::Horizontal sky = spp::sun::horizontal(t, paris);
+    std::println("altitude {:+.6f} deg  azimuth {:.6f} deg", sky.alt_deg, sky.az_deg);
 
-    // Sunrise, sunset and day length.
+    // Sunrise, sunset and day length. Next to polar day or night either can be
+    // missing, so check before use.
     const auto day = spp::events::day({2026, 6, 21}, paris);
-    std::println("sunrise {}  sunset {}  {:.4f} h", day.rise->iso_utc(), day.set->iso_utc(),
-                 day.duration_hours);
+    if (day.rise && day.set)
+        std::println("sunrise {}  sunset {}  {:.4f} h", day.rise->iso_utc(), day.set->iso_utc(),
+                     day.duration_hours);
 
     // Civil twilight: the Sun's center 6 deg below the horizon, either side of transit.
     const auto dusk = spp::events::crossing(day.transit, paris, {}, spp::events::civil_twilight_deg,
@@ -386,8 +387,8 @@ int main() {
 
 ```
 RA 0.000002 h  Dec +0.000111 deg
-altitude +29.298636 deg
-sunrise 2026-06-21T03:47:16Z  sunset 2026-06-21T19:57:33Z  16.1715 h
+altitude +29.298672 deg  azimuth 230.093725 deg
+sunrise 2026-06-21T03:46:28Z  sunset 2026-06-21T19:58:21Z  16.1981 h
 civil dusk 2026-06-21T20:40:32Z
 ```
 
@@ -419,7 +420,7 @@ produced a number is always explicit.
 | `Horizontal` | `alt_deg`, `az_deg` |
 | `Observer` | `lat_deg`, `lon_deg` (East +), `elev_m` |
 | `Atmosphere` | `pressure_mbar` (1010), `temp_c` (10), `refraction` (true) |
-| `norm360`, `norm2pi`, `wrap180` | Angle normalization |
+| `norm360`, `wrap180` | Angle normalization |
 | Constants (`spp/core/constants.hpp`) | `deg2rad`, `rad2deg`, `jd_j2000_day`, `days_per_century`, WGS84, solar constants |
 
 #### `spp::sun` — the Sun from the geocenter (`spp/sun.hpp`)
@@ -429,6 +430,7 @@ produced a number is always explicit.
 | `geometric(Instant<TT>)` | Geometric ecliptic position ([§4](#4-geometric-geocentric-sun)) |
 | `apparent_ecliptic(Instant<TT>, Nutation)` | Plus nutation in longitude and aberration ([§7](#7-aberration-and-the-apparent-longitude)) |
 | `apparent(Instant<TT> [, Nutation])` | Apparent RA and Dec, true equator and equinox of date ([§8](#8-ecliptic-to-equatorial)) |
+| `horizontal(Time, Observer [, Atmosphere])` | The Sun in the observer's sky: topocentric azimuth and refracted altitude ([§10](#10-topocentric-parallax)–[§12](#12-atmospheric-refraction)) |
 
 #### `spp::earth` — Earth orientation (`spp/earth.hpp`)
 
@@ -450,6 +452,7 @@ produced a number is always explicit.
 | `to_horizontal(Equatorial, lat_deg, lst_deg)` | Equatorial → horizontal, geometric ([§11](#11-horizontal-coordinates)) |
 | `parallax(Equatorial, Observer, lst_deg)` | Geocentric → topocentric ([§10](#10-topocentric-parallax)) |
 | `refraction(geometric_alt_deg, Atmosphere)` | Apparent (refracted) altitude ([§12](#12-atmospheric-refraction)) |
+| `observe(Equatorial, Observer, lst_deg, Atmosphere)` | Parallax, horizontal coordinates and refraction in one call: what the observer sees |
 
 #### `spp::events` — events in time (`spp/events.hpp`)
 
@@ -521,8 +524,9 @@ cache.
 - **`events::day(date, …)`** searches around local solar noon of `date`, taken
   as 12:00 − longitude/15 h UTC. Rise and set are searched within 12 h either
   side of that transit, so they can fall on the neighbouring UTC date.
-- **Day type** is decided from the altitudes at transit and 12 h later
-  ([§13.2](#132-one-day)).
+- **Day type** is decided from the altitudes at transit and 12 h before and
+  after it. Next to polar day, a normal day can have a sunset but no sunrise
+  (or the reverse) ([§13.2](#132-one-day)).
 
 ---
 
@@ -561,7 +565,8 @@ so any intermediate quantity can be obtained on its own.
 
 The Julian Date (JD) counts days continuously from 4713 BC January 1, 12:00
 (Julian proleptic calendar). A JD near the present is about 2.46 × 10⁶; stored
-in one `double`, its resolution would be 2⁻²² day ≈ 20 µs.
+in one `double`, which lies in [2²¹, 2²²), the spacing between adjacent values
+would be 2⁻³¹ day ≈ 40 µs (a rounding error of up to 2⁻³² day ≈ 20 µs).
 
 Spp stores every instant as an integer day plus a fraction:
 
@@ -578,7 +583,7 @@ Construction normalizes any (d, f):
 2. If f < 0: d ← d − 1; f ← f + 1.
 
 Adding an offset (DUT1, ΔT) renormalizes the same way: a fraction ≥ 1 moves
-⌊f⌋ days into d, and a negative fraction borrows ⌊|f|⌋ + 1 days.
+⌊f⌋ days into d, and a negative fraction borrows ⌈|f|⌉ days.
 
 Differences are formed from the split parts, e.g. days since J2000.0:
 
@@ -709,6 +714,16 @@ $$
 \Delta T = 69.06 + (93 - 69.06)\,\frac{y - 2026}{24}.
 $$
 
+This bridge rises by about 1 s per year, whereas observed ΔT has been flat or
+slightly falling since 2021 (see the table): the Earth's rotation has recently
+sped up, against the long-term trend the fits assume. Since
+ΔT = 32.184 s + (TAI − UTC) − (UT1 − UTC), with TAI − UTC = 37 s since 2017 and
+|UT1 − UTC| < 0.9 s, the current value stays near 69.1 s until a leap second
+is introduced, while the bridge already gives about 69.8 s by late 2026. The
+resulting error in the Sun's position is under 0.03″ (0.0411″ per second of
+ΔT, [§2.5](#25-time-scales)); hour angles are unaffected, since they depend on
+UT1, not ΔT.
+
 **Prediction, 2050 ≤ y < 2150.** With u = (y − 1820)/100:
 
 $$
@@ -798,10 +813,8 @@ $$
 \lambda = L + 180^\circ \pmod{360^\circ},\qquad \beta = -B,\qquad \Delta = R .
 $$
 
-The default build uses this closed form. Reference mode instead builds the
-rectangular vector, negates it and converts back with
-λ = atan2(Y, X), β = atan2(Z, √(X² + Y²)). The two agree to rounding; the
-closed form has fewer operations.
+Spp uses this closed form directly. Building the rectangular vector, negating
+it and converting back with atan2 gives the same angles, with more rounding.
 
 β is tiny (the Earth's heliocentric latitude on the ecliptic of date stays
 below 1.3″ over 1000 BC–3000 AD), but it is kept throughout.
@@ -876,9 +889,8 @@ $$
 \end{aligned}
 $$
 
-The default build evaluates it in Horner form; reference mode uses the power
-sum as written. The true obliquity, the angle between the true equator and the
-ecliptic, is
+Spp evaluates it in Horner form. The true obliquity, the angle between the
+true equator and the ecliptic, is
 
 $$
 \varepsilon = \varepsilon_0 + \Delta\varepsilon .
@@ -895,19 +907,21 @@ the Sun's apparent direction is annual aberration.
 In the heliocentric frame the Sun is at rest, so light-time and aberration are
 the same effect seen in two frames. It is applied once.
 
-For a circular orbit the displacement in longitude is the constant of
-aberration κ = 20.49552″. For the real orbit it scales with the Earth's
-transverse velocity. To first order in the eccentricity e this is
-proportional to 1 + e cos ν (ν the true anomaly), and the orbit equation gives
-1 + e cos ν = a(1 − e²)/R. With a ≈ 1 AU:
+The displacement in longitude is the Earth's velocity perpendicular to the
+Sun's direction, divided by c. For a Keplerian orbit that component is h/R,
+with h the constant specific angular momentum, so the 1/R dependence is exact.
+The classical constant of aberration, κ = 20.49552″, is defined with the
+factor 1/√(1 − e²); writing h in terms of a, e and the period then gives,
+with a = 1 AU and no approximation in e,
 
 $$
 \Delta\lambda_{\text{ab}} = -\,\kappa\,\frac{1 - e^2}{R} = -\,\frac{20.4898''}{R}
 \qquad(\text{Meeus 25.10}),
 $$
 
-since 20.49552″ × (1 − 0.0167086²) = 20.4898″. The effect in latitude is
-proportional to β and is neglected.
+since 20.49552″ × (1 − 0.0167086²) = 20.4898″. What is neglected is the effect
+in latitude, which is proportional to β, and the Sun's own motion about the
+barycenter of the solar system.
 
 The apparent ecliptic position is then
 
@@ -953,7 +967,7 @@ $$
 **Exact reduction.** Evaluated as written, 360.98564736629 × D reaches about
 4 × 10⁸° at 1000 BC. A double resolves only about 6 × 10⁻⁸° there, and the
 decimal coefficient itself is stored with a relative error of about 10⁻¹⁶.
-The default build removes the large part exactly:
+Spp removes the large part exactly:
 
 1. Split D = D<sub>int</sub> + f, with D<sub>int</sub> = d − 2451545 an
    integer and f the JD fraction.
@@ -969,8 +983,7 @@ The default build removes the large part exactly:
 
 The largest intermediate stays below about 10³°. Compared with the formula
 evaluated in exact rational arithmetic over 1000 BC–3000 AD, the direct form
-errs by up to 3.8 × 10⁻⁴″ and the split form by 1.9 × 10⁻⁷″. Reference mode
-keeps the direct form.
+errs by up to 3.8 × 10⁻⁴″ and the split form by 1.9 × 10⁻⁷″.
 
 **Apparent and local sidereal time.** The equation of the equinoxes
 converts mean to apparent sidereal time:
@@ -1073,37 +1086,30 @@ $$
 k = \frac{P}{1010}\cdot\frac{283}{273 + T_C}.
 $$
 
-3. With the Saemundsson (1986) expression (Meeus 16.4)
+3. The Saemundsson (1986) expression (Meeus 16.4) gives the refraction as a
+   function of the true (geometric) altitude:
 
 $$
-R(h) = k \cdot \frac{1.02'}{\tan\!\left(h + \dfrac{10.3^\circ}{h + 5.11^\circ}\right)},
+R(h_g) = k \cdot \frac{1.02'}{\tan\!\left(h_g + \dfrac{10.3^\circ}{h_g + 5.11^\circ}\right)},
+\qquad h_a = h_g + R(h_g).
 $$
 
-   the apparent altitude h<sub>a</sub> is found by fixed-point iteration of
-   h<sub>a</sub> = h<sub>g</sub> + R(max(h<sub>a</sub>, −1°)), starting from
-   h<sub>a</sub> = h<sub>g</sub>, for at most 3 iterations, stopping early
-   when a step changes h<sub>a</sub> by less than 10⁻⁶°.
+   It is evaluated once, directly; no iteration is involved.
 
 `Atmosphere::refraction = false` returns the geometric altitude.
 
-**Note on the formula's argument.** Saemundsson's expression is defined as a
-function of the *true* (geometric) altitude: the apparent altitude is
-h<sub>g</sub> + R(h<sub>g</sub>) directly, with no iteration. Iterating with
-R evaluated at the *apparent* altitude computes a smaller refraction than the
-formula specifies. The difference is negligible high in the sky but reaches
-several arcminutes at the horizon (default atmosphere):
+With the default atmosphere (1010 mbar, 10 °C):
 
-| Geometric altitude | Refraction applied by Spp | Saemundsson at the true altitude |
-|---|---|---|
-| 0° | 25.60′ | 28.98′ |
-| 5° | 9.45′ | 9.67′ |
-| 10° | 5.36′ | 5.41′ |
-| 20° | 2.735′ | 2.741′ |
-| 45° | 1.012′ | 1.013′ |
+| Geometric altitude | Refraction |
+|---|---|
+| 0° | 28.98′ |
+| 5° | 9.67′ |
+| 10° | 5.41′ |
+| 20° | 2.74′ |
+| 45° | 1.01′ |
 
-For comparison, the standard horizon refraction used by almanacs is 34′ at
-apparent altitude 0°. The consequences for rise and set times are quantified
-in [§13.1](#131-definitions).
+An apparent altitude of 0° corresponds to 34.43′ of refraction, in agreement
+with the standard 34′ horizon refraction used by almanacs.
 
 Refraction does not change the azimuth.
 
@@ -1130,22 +1136,25 @@ Refraction does not change the azimuth.
   H = 0 ([§10](#10-topocentric-parallax)).
 
 **Relation to the almanac convention.** Almanacs define sunrise and sunset
-as the geometric altitude of the center at −0.8333° (34′ standard refraction
-plus 16′ semidiameter). Because of the refraction evaluation described in
-[§12](#12-atmospheric-refraction), Spp's condition corresponds to a geometric
-altitude of −0.7927° with the default atmosphere (31.56′ of refraction). So
-Spp's sunrise comes later and its sunset earlier than the almanac convention,
-symmetrically (measured, sea level, 2026):
+as the geometric altitude of the center at −0.8333°: the 34′ of refraction at
+the horizon plus the 16′ semidiameter, both taken as fixed. Spp instead
+refracts the center itself, which sits 16′ below the horizon, where the
+refraction is larger. With the default atmosphere its condition corresponds
+to a geometric altitude of −0.8956° (37.73′ of refraction). So Spp's sunrise
+comes earlier and its sunset later than the almanac convention, symmetrically
+(measured, sea level, 2026):
 
 | Place and date | Sunrise | Sunset |
 |---|---|---|
-| Equator, March equinox | +9.8 s | −9.8 s |
-| 48.86° N (Paris), June solstice | +18.9 s | −18.9 s |
-| 48.86° N (Paris), December solstice | +18.4 s | −18.4 s |
-| 60° N, June solstice | +34.1 s | −34.1 s |
+| Equator, March equinox | −14.9 s | +14.9 s |
+| 48.86° N (Paris), June solstice | −29.0 s | +29.0 s |
+| 48.86° N (Paris), December solstice | −28.1 s | +28.1 s |
+| 60° N, June solstice | −52.4 s | +52.4 s |
 
 The difference grows with latitude because the Sun crosses the horizon at a
-shallower angle.
+shallower angle. To reproduce the almanac convention exactly, solve for the
+geometric altitude −0.8333° with refraction disabled:
+`events::crossing(transit, obs, {.refraction = false}, -50.0 / 60.0, dir)`.
 
 #### 13.2 One day
 
@@ -1155,18 +1164,24 @@ shallower angle.
    UTC on the given date, split into whole hours, minutes and seconds.
 2. **Transit** is refined from it ([§13.3](#133-transit)).
 3. **Classification.** h<sub>noon</sub> is the apparent altitude at transit,
-   and h<sub>night</sub> the apparent altitude 12 h later.
+   and h<sub>before</sub>, h<sub>after</sub> the apparent altitudes 12 h
+   before and after it, approximating the two lower culminations.
    - h<sub>noon</sub> < −16′: `PolarNight`, duration 0 h.
-   - h<sub>night</sub> > −16′: `PolarDay`, duration 24 h.
+   - h<sub>before</sub> > −16′ and h<sub>after</sub> > −16′: `PolarDay`,
+     duration 24 h.
    - Otherwise `Normal`.
-
-   The altitude 12 h after transit approximates the lower culmination. The
-   two differ only through the Sun's motion over half a day, which matters
-   within a small fraction of a degree of the polar limits.
 4. **Rise and set** are the crossings of −16′ before and after transit
    ([§13.4](#134-crossings)).
-5. **Duration** = set − rise, in hours, computed from the split JDs. Rise and
-   set may fall on the UTC dates on either side of `date`.
+5. **Duration** is the time above the horizon within the 24 h centered on
+   transit: set − rise, in hours, computed from the split JDs. Rise and set
+   may fall on the UTC dates on either side of `date`.
+
+**Days next to polar day.** On the last day before polar day, the Sun rises
+but does not set again within 12 h of transit; on the first day after it, the
+Sun sets but was already up 12 h before transit. Such a day is `Normal` with
+only one of `rise` and `set`, and the missing end of the window counts as
+daylight. For example, at 70° N on 2026-07-27 the Sun sets at 23:45 UTC with
+no sunrise, and the duration is 23.64 h.
 
 #### 13.3 Transit
 
@@ -1246,21 +1261,6 @@ iterations, and returns the bracket's midpoint.
 Measured on random dates and observers, the refined instants satisfy the event
 condition to better than 10⁻⁵″ in altitude.
 
-#### 13.5 Reference-mode solver
-
-The `exact` build (see [Build modes](#build-modes)) uses a simpler,
-fixed-tolerance solver instead:
-
-- **Transit:** up to 3 Newton steps as in §13.3, stopping when
-  |H| < 0.001°.
-- **Crossing:** hourly scan outward from transit (up to 12 h), then a
-  secant/bisection hybrid on the bracket. It stops when |f| < 0.001°, when the
-  bracket is narrower than 0.1 s, or after 30 iterations.
-
-An altitude tolerance of 0.001° is about 0.25 s of time at mid latitudes, but
-many seconds near the polar limits, where the altitude changes slowly (up to
-about 15 s at 89°).
-
 ---
 
 ## Numerical methods
@@ -1269,8 +1269,8 @@ about 15 s at 89°).
 
 Evaluating VSOP87D (2,425 cosines) and the nutation series (20 sines and
 cosines, 5 arguments) dominates the cost of a solar position. All five
-quantities, L, B, R, Δψ and Δε, are smooth functions of time. The default
-build therefore replaces them with Chebyshev interpolants over short segments.
+quantities, L, B, R, Δψ and Δε, are smooth functions of time, so Spp replaces
+them with Chebyshev interpolants over short segments.
 
 **Segments.** Time is divided into 16-day segments aligned on J2000.0: segment
 k covers days [16k, 16k + 16) from JD 2451545. For an instant (d, f), the
@@ -1299,9 +1299,9 @@ so that $g(x) \approx \sum_{m=0}^{N} c_m T_m(x)$.
 **Offset.** Each quantity is fitted as the residual g = X − X<sub>mid</sub>
 from its value at the middle node. VSOP87D longitude reaches about
 2 × 10⁴ rad, and fitting it directly would cost about 10 bits of precision
-to rounding in the coefficients. The residual over 16 days is only about
-0.28 rad. The offset is added back as the last operation, with a single
-rounding.
+to rounding in the coefficients. L advances about 0.28 rad over a segment, so
+the residual from the middle node is at most about 0.14 rad. The offset is
+added back as the last operation, with a single rounding.
 
 **Evaluation.** Clenshaw's recurrence, run for the five quantities in the
 same loop so that their independent dependency chains overlap:
@@ -1343,12 +1343,11 @@ Sun), so the most recent instant is also memoized.
   rectangular coordinates ([§4](#4-geometric-geocentric-sun)).
 - **Shared nutation.** Δψ and ε are computed once per instant and used for
   both the apparent place and the equation of the equinoxes.
-- **Solver.** The analytic first guess replaces most of the hourly scan, and
-  the superlinear refinement converges to 1 µs instead of 0.001°
-  ([§13.4](#134-crossings)).
+- **Solver.** The analytic first guess brackets each crossing within minutes,
+  and the superlinear refinement converges to 1 µs ([§13.4](#134-crossings)).
 
-None of these changes a result by more than double-precision rounding, except
-GMST and the solver, which are more accurate than the direct forms.
+None of these changes a result by more than double-precision rounding; the
+split GMST is more accurate than the direct form.
 
 ---
 
@@ -1361,12 +1360,13 @@ GMST and the solver, which are more accurate than the direct forms.
 | VSOP87D theory (complete series) | About 1″ over several thousand years around J2000 (authors' estimate) | Solar longitude, latitude, distance |
 | Dynamical vs FK5 equinox | 0.09″, not applied ([Limitations](#limitations)) | Solar longitude |
 | Nutation: IAU 1980 truncated to 20 terms | A few hundredths of an arcsecond | Apparent place, sidereal time |
-| Aberration, first order in e; none in latitude | Below 0.01″ | Apparent place |
+| Aberration: none in latitude, no barycentric motion of the Sun | Below 0.01″ | Apparent place |
 | Equation of the equinoxes without the 1994 terms | Below 0.003″ | Sidereal time |
-| ΔT, observed era (2005–2026) | About 0.2 s → 0.01″ in position | Solar position |
-| ΔT, future and pre-telescopic | Seconds to hours → up to 0.04″/s in position | Solar position |
+| ΔT, observed era (2005–2025) | About 0.2 s → 0.01″ in position | Solar position |
+| ΔT, linear bridge after 2026 ([§2.6](#26-δt)) | About 0.7 s high by late 2026 → 0.03″ | Solar position |
+| ΔT, future and pre-telescopic | Seconds to hours → 0.041″ per second in position | Solar position |
 | DUT1 = 0 (default) | Up to 0.9 s → up to 13.5″ | Hour angle, altitude, azimuth, event times |
-| Refraction evaluation ([§12](#12-atmospheric-refraction)) | 3.4′ at the horizon; event times 10–35 s at 0°–60° latitude | Low altitudes, rise/set |
+| Sunrise/sunset definition vs the almanac convention ([§13.1](#131-definitions)) | Sunrise 15–52 s earlier (sunset later) at 0°–60° latitude | Rise/set |
 | Fixed 16′ semidiameter | ±0.3′ → a few seconds | Rise/set |
 | Real atmosphere vs model | Often minutes near the horizon | Rise/set, low altitudes |
 | Numerical error | See below | Everything |
@@ -1400,36 +1400,20 @@ Numerical error is far below the model error:
 
 ## Performance
 
-Measured with `spp_bench` on one core (release build):
+Measured with `spp_bench` on one core (release build). Each measurement runs
+once before it is timed, so all of them see the ephemeris cache already
+filled for the instants they use:
 
 | Operation | Time |
 |---|---|
-| `sun::apparent` | 0.58 µs |
-| `events::altitude_deg` | 0.38 µs |
-| `events::day` (transit, rise, set) | 6.7 µs |
-| `spp year` (365 days, including process start) | ~36 ms |
+| `sun::apparent` | 0.15 µs |
+| `events::altitude_deg` (includes the apparent Sun) | 0.35 µs |
+| `events::day` (transit, rise, set) | 6.6 µs |
+| `spp year` (365 days, including process start-up) | ~60 ms |
 
-How this is achieved is described in [Numerical methods](#numerical-methods).
-Reference mode, which evaluates every series directly, takes about 12 µs per
-altitude and 265 µs per day.
-
----
-
-## Build modes
-
-**`release` (default)** uses the methods in [Numerical methods](#numerical-methods).
-
-**`exact`** (`cmake --preset exact`, or `-DSPP_EXACT=ON`) is a reference mode:
-
-- Every series is evaluated directly on every call.
-- Every formula keeps its textbook operation order: power-sum polynomials,
-  rectangular geocentric inversion, direct GMST.
-- Events use the fixed-tolerance solver of [§13.5](#135-reference-mode-solver).
-- It is 30–40× slower than `release`. It exists as a stable reference for
-  regression comparisons, not for production use.
-
-The mode is selected at compile time through `SPP_EXACT` (`src/build_mode.hpp`).
-It never changes the public API.
+Filling one 16-day cache segment costs 25 direct series evaluations, about
+0.3 ms. How the rest is achieved is described in
+[Numerical methods](#numerical-methods).
 
 ---
 
@@ -1458,8 +1442,11 @@ Seasonal++/
 ├── .editorconfig, .gitattributes, .gitignore
 ├── cmake/SppFlags.cmake          compiler flags and floating-point policy
 ├── data/VSOP87D.ear              VSOP87D Earth series (source data)
-├── tools/vsop_gen.cpp            .ear → exact C++ tables, run at build time
-├── tools/figures.cpp             renders the README figures (SVG)
+├── tools/
+│   ├── vsop_gen.cpp              .ear → exact C++ tables, run at build time
+│   ├── cache_check.cpp           cache accuracy against extended precision
+│   ├── bench.cpp                 benchmark
+│   └── figures.cpp               renders the README figures (SVG)
 ├── docs/images/                  README figures
 ├── include/spp/
 │   ├── spp.hpp                   umbrella header
@@ -1469,12 +1456,11 @@ Seasonal++/
 ├── src/
 │   ├── core/  model/             implementations
 │   ├── sun.cpp  earth.cpp  sky.cpp  events.cpp
-│   ├── earth_state.{hpp,cpp}     Chebyshev earth-state cache
-│   └── build_mode.hpp            build-mode switch
-├── apps/spp/main.cpp             command-line tool (demonstration front end)
-├── apps/spiral/main.cpp          sunrise/sunset azimuth spirals (OpenGL)
-├── bench/bench_pipeline.cpp      benchmark
-└── validation/cache_check.cpp    cache accuracy against extended precision
+│   └── earth_state.{hpp,cpp}     Chebyshev earth-state cache
+└── apps/
+    ├── spp/main.cpp              command-line tool (demonstration front end)
+    ├── spiral/main.cpp           sunrise/sunset azimuth spirals (OpenGL)
+    └── common/                   helpers shared by the viewer and the figures
 ```
 
 ---
@@ -1494,24 +1480,16 @@ Seasonal++/
   equinoxes (below 0.003″).
 - **ΔT** always comes from the built-in model; the API has no way to supply
   another value. The observed table ends with a provisional value for 2026,
-  and later years are predictions. **DUT1** can be supplied per call.
-- **Refraction.**
-  - Saemundsson's formula is evaluated at the apparent altitude rather than
-    the true altitude it is defined on, which reduces horizon refraction by
-    about 3.4′. Sunrise and sunset move 10–35 s toward noon relative to the
-    −0.8333° almanac convention ([§12](#12-atmospheric-refraction),
-    [§13.1](#131-definitions)).
-  - The model applies no refraction below −2° geometric altitude.
-  - Real horizon refraction varies from night to night.
+  and later years are predictions; the 2026–2050 bridge is already about
+  0.7 s above the observed value ([§2.6](#26-δt)). **DUT1** can be supplied
+  per call.
+- **Refraction** is a standard-atmosphere model. It applies no refraction
+  below −2° geometric altitude, and real horizon refraction varies from night
+  to night.
 - **Semidiameter** is fixed at 16′ instead of following the Earth–Sun
   distance.
-- **Day classification** samples the altitude 12 h after transit instead of
-  finding the exact lower culmination ([§13.2](#132-one-day)).
-- **First day after polar day.** At high latitudes, the day on which the Sun
-  first dips below the horizon can have its only crossing more than 12 h from
-  the transit it is searched around. `events::day` then returns `Normal` with a
-  sunset but no sunrise, and a duration of 0 h. Examples: 70° N on 2026-07-27
-  and 80° N on 2026-08-29.
+- **Day classification** samples the altitude 12 h before and after transit
+  instead of finding the exact lower culminations ([§13.2](#132-one-day)).
 - **Rise/set with a raised horizon** (mountains, observer height above
   terrain) is not modelled; elevation only affects parallax.
 

@@ -20,9 +20,7 @@ enum class Direction { Before = -1, After = 1 };   // rise side / set side of tr
 
 enum class DayType { Normal, PolarDay, PolarNight };
 
-// Convergence of transit and crossing refinement. (A reference-mode build,
-// SPP_EXACT, ignores this and uses a fixed 0.001 deg altitude tolerance,
-// ~0.25 s of time.)
+// Convergence of transit and crossing refinement.
 struct SolverConfig {
     double time_tolerance_s = 1e-6;
     int max_iter = 60;
@@ -49,7 +47,10 @@ Time transit(const Time& approx, double lon_east_deg, const SolverConfig& cfg = 
 std::optional<Time> crossing(const Time& transit, const Observer& obs, const Atmosphere& atm,
                              double target_alt_deg, Direction dir, const SolverConfig& cfg = {});
 
-// Transit, sunrise, sunset and day length for a civil date.
+// Transit, sunrise, sunset and day length for a civil date. Next to polar day,
+// one crossing can be missing because the Sun is already (or still) up at the
+// edge of the 24 h centered on transit; duration_hours is the time above the
+// horizon within that window.
 Day day(const CivilDate& date, const Observer& obs, const Atmosphere& atm = {},
         double dut1_s = 0.0, const SolverConfig& cfg = {});
 

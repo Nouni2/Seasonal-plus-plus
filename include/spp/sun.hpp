@@ -4,7 +4,7 @@
 #include "spp/core/types.hpp"
 #include "spp/earth.hpp"
 
-// The Sun as seen from the geocenter.
+// The Sun: its geocentric position, and its place in an observer's sky.
 namespace spp::sun {
 
 // Geometric geocentric ecliptic position (VSOP87D Earth, inverted).
@@ -16,5 +16,8 @@ Ecliptic apparent_ecliptic(Instant<TT> t, const earth::Nutation& n);
 // Apparent geocentric equatorial position (true equator and equinox of date).
 Equatorial apparent(Instant<TT> t, const earth::Nutation& n);
 Equatorial apparent(Instant<TT> t);   // computes nutation itself
+
+// The Sun in the observer's sky: topocentric azimuth and refracted altitude.
+Horizontal horizontal(const Time& t, const Observer& obs, const Atmosphere& atm = {});
 
 }  // namespace spp::sun

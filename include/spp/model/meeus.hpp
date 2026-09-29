@@ -23,12 +23,10 @@ struct CalendarDay {
 SplitJd jd_from_civil(const CivilDateTime& c);
 CalendarDay calendar_from_jd(std::int64_t day, double frac);
 
-// Formula 12.4: GMST in degrees [0, 360). Days/centuries counted on UT1.
-double gmst_deg(double days_since_j2000_ut1);
-
-// Same formula evaluated without the ~1e8 deg intermediate of 360.98...·D
-// (which a double resolves only to ~1e-8 deg): D is split into whole days and
-// a fraction, and 360·(whole days) ≡ 0 (mod 360) is dropped exactly.
+// Formula 12.4: GMST in degrees [0, 360), with D = days + frac counted on UT1
+// since J2000.0. Evaluated without the ~1e8 deg intermediate of 360.98...·D
+// (which a double resolves only to ~1e-8 deg): 360·(whole days) ≡ 0 (mod 360)
+// is dropped exactly.
 double gmst_deg(std::int64_t whole_days_since_j2000_ut1, double frac);
 
 }  // namespace spp::model::meeus

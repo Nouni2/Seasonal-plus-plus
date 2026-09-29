@@ -6,7 +6,6 @@
 #include <limits>
 
 #include "spp/core/constants.hpp"
-#include "build_mode.hpp"
 #include "spp/model/iau1980.hpp"
 #include "spp/model/vsop87d.hpp"
 
@@ -19,12 +18,6 @@ EarthState earth_state_direct(double T) {
 }
 
 namespace {
-
-#ifdef SPP_EXACT
-
-EarthState evaluate(Instant<TT> t) { return earth_state_direct(t.centuries_since_j2000()); }
-
-#else
 
 // Segments are kSegmentDays long, aligned on J2000.0 (a TT noon), and each
 // holds a degree-kDegree Chebyshev series per quantity. The series fits the
@@ -112,8 +105,6 @@ EarthState evaluate(Instant<TT> t) {
     for (int q = 0; q < kQuantities; ++q) out[q] = seg.offset[q] + (x * b1[q] - b2[q] + seg.c[0][q]);
     return {out[0], out[1], out[2], out[3], out[4]};
 }
-
-#endif
 
 struct Memo {
     std::int64_t day = std::numeric_limits<std::int64_t>::min();

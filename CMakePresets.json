@@ -23,14 +23,6 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
-    },
-    {
-      "name": "exact",
-      "inherits": "ucrt64-base",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "SPP_EXACT": "ON"
-      }
     }
   ],
   "buildPresets": [
@@ -41,10 +33,6 @@
     {
       "name": "release",
       "configurePreset": "release"
-    },
-    {
-      "name": "exact",
-      "configurePreset": "exact"
     }
   ]
 }

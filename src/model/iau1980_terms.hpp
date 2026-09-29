@@ -1,7 +1,7 @@
 #pragma once
 
 // Internal: IAU 1980 nutation series, 20 largest terms (Meeus Table 22.A).
-// Shared by the model and the extended-precision checks in validation/.
+// Shared by the model and the extended-precision check in tools/cache_check.cpp.
 
 namespace spp::model::iau1980 {
 
