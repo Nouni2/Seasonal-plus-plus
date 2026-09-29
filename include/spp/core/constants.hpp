@@ -18,13 +18,16 @@ inline constexpr double days_per_millennium = 365250.0;
 inline constexpr double seconds_per_day = 86400.0;
 inline constexpr long long jd_gregorian_start = 2299161;   // 1582-10-15
 
-// WGS84 ellipsoid
+// WGS84 ellipsoid and Earth rotation
 inline constexpr double wgs84_a_m = 6378137.0;
 inline constexpr double wgs84_f = 1.0 / 298.257223563;
+inline constexpr double earth_rotation_rad_s = 7.292115e-5;   // sidereal rate
+inline constexpr double speed_of_light_m_s = 299792458.0;
 
 // Solar constants
 inline constexpr double sun_aberration_arcsec = 20.4898;       // Meeus 25.10, divided by R
 inline constexpr double sun_parallax_arcsec = 8.794;           // at 1 AU
-inline constexpr double sun_semidiameter_deg = 16.0 / 60.0;    // almanac convention
+inline constexpr double sun_radius_arcsec = 959.63;            // semidiameter at 1 AU
+inline constexpr double sun_semidiameter_deg = 16.0 / 60.0;    // mean, almanac convention
 
 }  // namespace spp

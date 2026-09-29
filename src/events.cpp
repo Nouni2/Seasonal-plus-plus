@@ -38,7 +38,7 @@ double hour_angle_deg(const Geocentric& g, double lon_east_deg) {
     return wrap180(earth::lst_deg(g.ut1, g.nutation, lon_east_deg) - g.sun.ra_deg);
 }
 
-Time approx_noon(const CivilDate& date, double lon_east_deg, double dut1_s) {
+Time approx_noon(const CivilDate& date, double lon_east_deg, std::optional<double> dut1_s) {
     // 12:00 - lon/15 in UTC, split into hours, minutes and seconds.
     const double approx_noon_utc_hour = 12.0 - (lon_east_deg / 15.0);
     const int h = static_cast<int>(approx_noon_utc_hour);
@@ -69,7 +69,7 @@ Transit transit_impl(const Time& approx, double lon_east_deg, const SolverConfig
     Geocentric g = geocentric(current);
     double H = hour_angle_deg(g, lon_east_deg);
     for (int i = 0; i < cfg.max_iter && std::abs(H) >= 1e-9; ++i) {
-        const Time next = Time::from_jd(current.utc().day, current.utc().frac - H / 360.0, current.dut1());
+        const Time next = current.shifted(-H / 360.0);
         const Geocentric g_next = geocentric(next);
         const double H_next = hour_angle_deg(g_next, lon_east_deg);
         if (std::abs(H_next) >= std::abs(H)) break;   // at the noise floor: keep the best
@@ -84,8 +84,8 @@ std::optional<Time> crossing_impl(const Transit& tr, double alt_transit, const O
                                   const Atmosphere& atm, double target_alt_deg, Direction dir,
                                   const SolverConfig& cfg) {
     const auto base = tr.time.utc();
-    const double dut1 = tr.time.dut1();
-    auto at = [&](double frac) { return Time::from_jd(base.day, frac, dut1); };
+    // Instants on the transit day, as offsets from transit (keeps DUT1 handling).
+    auto at = [&](double frac) { return tr.time.shifted(frac - base.frac); };
     auto f = [&](double frac) { return altitude_deg(at(frac), obs, atm) - target_alt_deg; };
 
     const double sgn = static_cast<int>(dir);
@@ -97,7 +97,7 @@ std::optional<Time> crossing_impl(const Transit& tr, double alt_transit, const O
     // 1. First guess from the hour angle where the geometric altitude reaches
     //    the target, with refraction at the target folded in:
     //    cos H0 = (sin h0 - sin φ sin δ) / (cos φ cos δ)
-    const double refr = sky::refraction(target_alt_deg, atm) - target_alt_deg;
+    const double refr = sky::refraction(target_alt_deg, sky::at_elevation(atm, obs.elev_m)) - target_alt_deg;
     const double h0 = (target_alt_deg - refr) * deg2rad;
     const double phi = obs.lat_deg * deg2rad;
     const double dec = tr.state.sun.dec_deg * deg2rad;
@@ -203,21 +203,24 @@ std::optional<Time> crossing(const Time& transit_time, const Observer& obs, cons
     return crossing_impl({transit_time, g}, altitude_from(g, obs, atm), obs, atm, target_alt_deg, dir, cfg);
 }
 
-Day day(const CivilDate& date, const Observer& obs, const Atmosphere& atm, double dut1_s,
+Day day(const CivilDate& date, const Observer& obs, const Atmosphere& atm, std::optional<double> dut1_s,
         const SolverConfig& cfg) {
     const Transit tr = transit_impl(approx_noon(date, obs.lon_deg, dut1_s), obs.lon_deg, cfg);
+
+    // The upper limb touches the horizon when the center is one semidiameter
+    // (959.63" / R, taken at transit) below it.
+    const double limb = -sun::semidiameter_deg(tr.time.tt());
 
     // Classify from the altitude at transit and at both lower culminations
     // around it (approximated as 12 h before and after).
     const double alt_noon = altitude_from(tr.state, obs, atm);
-    if (alt_noon < upper_limb_deg) return {date, DayType::PolarNight, tr.time, {}, {}, 0.0};
+    if (alt_noon < limb) return {date, DayType::PolarNight, tr.time, {}, {}, 0.0};
     const double alt_before = altitude_deg(tr.time.shifted(-0.5), obs, atm);
     const double alt_after = altitude_deg(tr.time.shifted(0.5), obs, atm);
-    if (alt_before > upper_limb_deg && alt_after > upper_limb_deg)
-        return {date, DayType::PolarDay, tr.time, {}, {}, 24.0};
+    if (alt_before > limb && alt_after > limb) return {date, DayType::PolarDay, tr.time, {}, {}, 24.0};
 
-    auto rise = crossing_impl(tr, alt_noon, obs, atm, upper_limb_deg, Direction::Before, cfg);
-    auto set = crossing_impl(tr, alt_noon, obs, atm, upper_limb_deg, Direction::After, cfg);
+    auto rise = crossing_impl(tr, alt_noon, obs, atm, limb, Direction::Before, cfg);
+    auto set = crossing_impl(tr, alt_noon, obs, atm, limb, Direction::After, cfg);
     return {date, DayType::Normal, tr.time, rise, set, duration_hours(tr.time, rise, set)};
 }
 

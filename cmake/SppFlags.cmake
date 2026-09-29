@@ -1,20 +1,29 @@
 # Compiler flags for every Spp target.
 #
 # Precision policy: speed must never cost accuracy.
-#   - No -ffast-math (or any of its sub-flags): IEEE 754 semantics are required.
-#   - -ffp-contract=off: GCC in GNU mode fuses a*b+c into FMA when -march allows
-#     it, which makes last-bit results depend on the target CPU. Results must
-#     be reproducible across machines, so contraction stays off.
-#   - -fexcess-precision=standard: no hidden extended-precision intermediates.
+#   - No fast-math (or any of its sub-flags): IEEE 754 semantics are required.
+#   - No floating-point contraction: fusing a*b+c into FMA makes last-bit
+#     results depend on the target CPU. Results must be reproducible across
+#     machines, so contraction stays off.
+#   - No hidden extended-precision intermediates.
+#
+# Developed and tested with GCC. The Clang and MSVC branches select the
+# equivalent options but are untested.
 
 function(spp_apply_flags target)
-    target_compile_options(${target} PRIVATE
-        -Wall -Wextra -Wpedantic -Wshadow -Wdouble-promotion
-        -ffp-contract=off
-        -fexcess-precision=standard
-        -fno-fast-math
-    )
-    if(SPP_NATIVE)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(${target} PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wdouble-promotion
+            -ffp-contract=off -fexcess-precision=standard -fno-fast-math)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(${target} PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wdouble-promotion
+            -ffp-contract=off -fno-fast-math)
+    elseif(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /permissive- /fp:precise /utf-8)
+    endif()
+
+    if(SPP_NATIVE AND NOT MSVC)
         target_compile_options(${target} PRIVATE -march=native)
     endif()
 endfunction()

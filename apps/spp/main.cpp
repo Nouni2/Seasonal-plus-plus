@@ -4,7 +4,8 @@
 //   spp day  YYYY-MM-DD LAT LON [ELEV]                transit, sunrise, sunset
 //   spp year YYYY LAT LON [ELEV]                      one CSV row per day
 //
-// Options: --dut1=S  --pressure=MBAR  --temp=C  --no-refraction
+// Options: --dut1=S (default: estimated)  --pressure=MBAR (default: standard at
+// the elevation)  --temp=C  --no-refraction
 // Longitude is positive East; elevation in metres.
 
 #include <charconv>
@@ -14,6 +15,7 @@
 #include <print>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include "spp/spp.hpp"
@@ -21,7 +23,7 @@
 namespace {
 
 struct Options {
-    double dut1 = 0.0;
+    std::optional<double> dut1;   // estimated when not given
     spp::Atmosphere atm;
 };
 
@@ -31,7 +33,8 @@ struct Options {
                  "  spp sun  YYYY-MM-DD HH:MM[:SS] [LAT LON [ELEV]]\n"
                  "  spp day  YYYY-MM-DD LAT LON [ELEV]\n"
                  "  spp year YYYY LAT LON [ELEV]\n"
-                 "options: --dut1=S --pressure=MBAR --temp=C --no-refraction");
+                 "options: --dut1=S --pressure=MBAR --temp=C --no-refraction\n"
+                 "  DUT1 is estimated and pressure follows the elevation unless given");
     std::exit(2);
 }
 
@@ -79,9 +82,10 @@ spp::Observer parse_observer(const std::vector<std::string_view>& a, std::size_t
     return {num(a[i]), num(a[i + 1]), a.size() > i + 2 ? num(a[i + 2]) : 0.0};
 }
 
-std::string clock(const std::optional<spp::Time>& t) {
+// Full ISO timestamp: events can fall on the neighbouring UTC date.
+std::string when(const std::optional<spp::Time>& t) {
     if (!t) return "-";
-    return t->iso_utc().substr(11, 8);
+    return t->iso_utc();
 }
 
 const char* type_name(spp::events::DayType t) {
@@ -106,7 +110,8 @@ int cmd_sun(const std::vector<std::string_view>& a, const Options& o) {
     const auto ecl = spp::sun::apparent_ecliptic(tt, n);
     const auto eq = spp::sun::apparent(tt, n);
 
-    std::println("time        {}  (ΔT {:.2f} s)", t.iso_utc(), t.delta_t());
+    std::println("time        {}  (ΔT {:.2f} s, DUT1 {:+.3f} s{})", t.iso_utc(), t.delta_t(), t.dut1(),
+                 t.dut1_estimated() ? " estimated" : "");
     std::println("ecliptic    λ {:.8f}°  β {:.8f}°  R {:.9f} AU", ecl.lon_deg, ecl.lat_deg, ecl.dist_au);
     std::println("equatorial  α {:.8f}° ({:.8f} h)  δ {:.8f}°", eq.ra_deg, eq.ra_hours(), eq.dec_deg);
     std::println("nutation    Δψ {:.4f}\"  Δε {:.4f}\"  ε {:.8f}°", n.dpsi_deg * 3600.0,
@@ -152,7 +157,7 @@ int cmd_year(const std::vector<std::string_view>& a, const Options& o) {
             if (year == 1582 && m == 10 && dd > 4 && dd < 15) continue;   // dropped by the reform
             const auto d = spp::events::day(date, obs, o.atm, o.dut1);
             std::println("{:04d}-{:02d}-{:02d},{},{},{},{},{:.6f}", year, m, dd, type_name(d.type),
-                         clock(d.transit), clock(d.rise), clock(d.set), d.duration_hours);
+                         when(d.transit), when(d.rise), when(d.set), d.duration_hours);
         }
     }
     return 0;
@@ -175,8 +180,12 @@ int main(int argc, char** argv) {
 
     const std::string_view cmd = args.front();
     args.erase(args.begin());
-    if (cmd == "sun") return cmd_sun(args, o);
-    if (cmd == "day") return cmd_day(args, o);
-    if (cmd == "year") return cmd_year(args, o);
+    try {
+        if (cmd == "sun") return cmd_sun(args, o);
+        if (cmd == "day") return cmd_day(args, o);
+        if (cmd == "year") return cmd_year(args, o);
+    } catch (const std::system_error&) {
+        return 1;   // output closed early, e.g. piped into `head`
+    }
     usage();
 }

@@ -37,9 +37,9 @@ match it to within double-precision rounding.
 $ spp day 2026-06-21 48.8566 2.3522 35
 type      NORMAL
 transit   2026-06-21T11:52:24Z
-sunrise   2026-06-21T03:46:28Z
-sunset    2026-06-21T19:58:21Z
-duration  16.1981 h
+sunrise   2026-06-21T03:46:32Z
+sunset    2026-06-21T19:58:17Z
+duration  16.1959 h
 ```
 
 ---
@@ -234,8 +234,9 @@ spp day  YYYY-MM-DD LAT LON [ELEV]                transit, sunrise, sunset, day 
 spp year YYYY LAT LON [ELEV]                      one CSV row per day
 
 options:
-  --dut1=S          UT1 - UTC in seconds (default 0)
-  --pressure=MBAR   surface pressure for refraction (default 1010)
+  --dut1=S          UT1 - UTC in seconds (default: estimated, see §2.5)
+  --pressure=MBAR   surface pressure for refraction (default: 1010 mbar at sea
+                    level, scaled to the elevation)
   --temp=C          surface temperature for refraction (default 10)
   --no-refraction   geometric altitudes
 ```
@@ -250,12 +251,12 @@ At the March equinox of 2026, λ passes through 0°:
 
 ```
 $ spp sun 2026-03-20 14:46 48.8566 2.3522 35
-time        2026-03-20T14:46:00Z  (ΔT 69.27 s)
-ecliptic    λ 0.00007180°  β 0.00009035°  R 0.995917594 AU
-equatorial  α 0.00002994° (0.00000200 h)  δ 0.00011145°
-nutation    Δψ 6.2175"  Δε 9.1309"  ε 23.43841881°
-sidereal    GMST 39.64780049°  GAST 39.64938507°
-horizontal  alt 29.298672° (geometric 29.268708°)  az 230.093725°
+time        2026-03-20T14:46:00Z  (ΔT 69.11 s, DUT1 +0.072 s estimated)
+ecliptic    λ 0.00004519°  β 0.00010129°  R 0.995917594 AU
+equatorial  α 0.00000117° (0.00000008 h)  δ 0.00011091°
+nutation    Δψ 6.2158"  Δε 9.1308"  ε 23.43841879°
+sidereal    GMST 39.64810164°  GAST 39.64968578°
+horizontal  alt 29.298435° (geometric 29.268563°)  az 230.094007°
 ```
 
 Without a location, only the geocentric lines are printed.
@@ -289,13 +290,14 @@ duration  14.4240 h
 ```
 $ spp year 2026 48.8566 2.3522
 date,type,transit_utc,sunrise_utc,sunset_utc,duration_h
-2026-01-01,NORMAL,11:54:09,07:43:36,16:04:54,8.354994
-2026-01-02,NORMAL,11:54:37,07:43:32,16:05:54,8.372716
+2026-01-01,NORMAL,2026-01-01T11:54:09Z,2026-01-01T07:43:33Z,2026-01-01T16:04:56Z,8.356327
+2026-01-02,NORMAL,2026-01-02T11:54:37Z,2026-01-02T07:43:30Z,2026-01-02T16:05:56Z,8.374047
 ...
 ```
 
-For 1582, the ten days removed by the Gregorian reform (October 5–14) are
-skipped.
+Event times are full ISO timestamps, because they can fall on the UTC date
+before or after the row's date. For 1582, the ten days removed by the
+Gregorian reform (October 5–14) are skipped.
 
 ---
 
@@ -386,9 +388,9 @@ int main() {
 ```
 
 ```
-RA 0.000002 h  Dec +0.000111 deg
-altitude +29.298672 deg  azimuth 230.093725 deg
-sunrise 2026-06-21T03:46:28Z  sunset 2026-06-21T19:58:21Z  16.1981 h
+RA 0.000000 h  Dec +0.000111 deg
+altitude +29.298435 deg  azimuth 230.094007 deg
+sunrise 2026-06-21T03:46:32Z  sunset 2026-06-21T19:58:17Z  16.1959 h
 civil dusk 2026-06-21T20:40:32Z
 ```
 
@@ -404,11 +406,13 @@ produced a number is always explicit.
 | Symbol | Description |
 |---|---|
 | `Time` | An instant held in UTC, with its DUT1 |
-| `Time::from_utc(y, mo, d, h, mi, s, dut1)` | From a civil UTC date and time |
+| `Time::from_utc(y, mo, d, h, mi, s [, dut1])` | From a civil UTC date and time; DUT1 is estimated when omitted ([§2.5](#25-time-scales)) |
 | `Time::from_civil(CivilDateTime, dut1)` | Same, from a struct |
 | `Time::from_jd(day, frac, dut1)` | From a split Julian Date (normalized) |
 | `t.utc()`, `t.ut1()`, `t.tt()` | The instant as `Instant<UTC/UT1/TT>` |
 | `t.delta_t()`, `t.dut1()` | ΔT = TT − UT1 and DUT1 = UT1 − UTC, seconds |
+| `t.tt_minus_utc()`, `t.dut1_estimated()` | TT − UTC in seconds; whether DUT1 was estimated rather than given |
+| `tai_minus_utc(Instant<UTC>)` | TAI − UTC from the leap-second table, or empty outside 1972 – 2027-06-28 |
 | `t.decimal_year()` | The year value used to evaluate ΔT |
 | `t.shifted(days)` | Another instant, same DUT1 |
 | `t.to_civil()`, `t.iso_utc()` | Civil UTC date and time; ISO 8601 rounded to the second |
@@ -419,7 +423,7 @@ produced a number is always explicit.
 | `Equatorial` | `ra_deg`, `dec_deg`, `dist_au`, `ra_hours()` |
 | `Horizontal` | `alt_deg`, `az_deg` |
 | `Observer` | `lat_deg`, `lon_deg` (East +), `elev_m` |
-| `Atmosphere` | `pressure_mbar` (1010), `temp_c` (10), `refraction` (true) |
+| `Atmosphere` | `pressure_mbar` (unset: 1010 mbar at sea level, scaled to the observer's elevation), `temp_c` (10), `refraction` (true) |
 | `norm360`, `wrap180` | Angle normalization |
 | Constants (`spp/core/constants.hpp`) | `deg2rad`, `rad2deg`, `jd_j2000_day`, `days_per_century`, WGS84, solar constants |
 
@@ -430,6 +434,7 @@ produced a number is always explicit.
 | `geometric(Instant<TT>)` | Geometric ecliptic position ([§4](#4-geometric-geocentric-sun)) |
 | `apparent_ecliptic(Instant<TT>, Nutation)` | Plus nutation in longitude and aberration ([§7](#7-aberration-and-the-apparent-longitude)) |
 | `apparent(Instant<TT> [, Nutation])` | Apparent RA and Dec, true equator and equinox of date ([§8](#8-ecliptic-to-equatorial)) |
+| `semidiameter_deg(Instant<TT>)` | Apparent semidiameter, 959.63″ / R |
 | `horizontal(Time, Observer [, Atmosphere])` | The Sun in the observer's sky: topocentric azimuth and refracted altitude ([§10](#10-topocentric-parallax)–[§12](#12-atmospheric-refraction)) |
 
 #### `spp::earth` — Earth orientation (`spp/earth.hpp`)
@@ -452,7 +457,9 @@ produced a number is always explicit.
 | `to_horizontal(Equatorial, lat_deg, lst_deg)` | Equatorial → horizontal, geometric ([§11](#11-horizontal-coordinates)) |
 | `parallax(Equatorial, Observer, lst_deg)` | Geocentric → topocentric ([§10](#10-topocentric-parallax)) |
 | `refraction(geometric_alt_deg, Atmosphere)` | Apparent (refracted) altitude ([§12](#12-atmospheric-refraction)) |
-| `observe(Equatorial, Observer, lst_deg, Atmosphere)` | Parallax, horizontal coordinates and refraction in one call: what the observer sees |
+| `diurnal_aberration(Equatorial, Observer, lst_deg)` | Shift from the observer's rotational velocity, up to 0.32″ ([§10](#10-topocentric-parallax)) |
+| `at_elevation(Atmosphere, elev_m)` | The atmosphere with its pressure filled in for an elevation ([§12](#12-atmospheric-refraction)) |
+| `observe(Equatorial, Observer, lst_deg, Atmosphere)` | Parallax, diurnal aberration, horizontal coordinates and refraction in one call: what the observer sees |
 
 #### `spp::events` — events in time (`spp/events.hpp`)
 
@@ -461,8 +468,8 @@ produced a number is always explicit.
 | `altitude_deg(Time, Observer, Atmosphere)` | Full pipeline: apparent, topocentric, refracted altitude of the Sun's center |
 | `transit(approx, lon, cfg)` | Meridian transit near an approximate instant ([§13.3](#133-transit)) |
 | `crossing(transit, obs, atm, target_alt_deg, dir, cfg)` | Instant the Sun's center reaches a target altitude before or after transit; `nullopt` if it never does within 12 h ([§13.4](#134-crossings)) |
-| `day(date, obs, atm, dut1, cfg)` | `Day{date, type, transit, rise, set, duration_hours}` ([§13.2](#132-one-day)) |
-| `upper_limb_deg` | −16′: sunrise/sunset |
+| `day(date, obs [, atm, dut1, cfg])` | `Day{date, type, transit, rise, set, duration_hours}` ([§13.2](#132-one-day)) |
+| `upper_limb_deg` | −16′: the mean sunrise/sunset altitude (`day` uses the actual semidiameter) |
 | `civil_twilight_deg`, `nautical_twilight_deg`, `astronomical_twilight_deg` | −6°, −12°, −18° |
 | `DayType` | `Normal`, `PolarDay`, `PolarNight` |
 | `Direction` | `Before` (rising side), `After` (setting side) |
@@ -506,20 +513,22 @@ cache.
 - **Julian Dates** are stored split into an integer day and a fraction in
   [0, 1), where fraction 0 is noon ([§2.1](#21-julian-dates-and-split-storage)).
 - **UTC** is the input and output scale. **UT1** = UTC + DUT1 drives Earth
-  rotation (sidereal time). **TT** = UT1 + ΔT drives the ephemeris.
-- **DUT1** defaults to 0, which makes UT1 equal to UTC. |UT1 − UTC| < 0.9 s,
-  which bounds the resulting rotation error to 13.5″. Pass the IERS value for
-  sub-arcsecond hour angles.
+  rotation (sidereal time). **TT** drives the ephemeris; from 1972 it is exact,
+  TT = UTC + 32.184 s + (TAI − UTC) from the leap-second table.
+- **DUT1** is estimated when not given (typically within a few hundredths of a
+  second from 1972 on; [§2.5](#25-time-scales)). Pass the IERS value for the
+  best hour angles.
 - **Calendar.** The Julian calendar is used before 1582-10-15 and the Gregorian
   from that date on. Years use astronomical numbering: 1 BC is year 0, 2 BC is
   year −1.
 
 ### Events
 
-- **Sunrise and sunset** are the instants the apparent (refracted) altitude of
-  the Sun's center equals −16′, i.e. the upper limb touches the horizon for a
-  fixed semidiameter of 16′. See [§13.1](#131-definitions) for how this
-  relates to the usual −0.8333° almanac convention.
+- **Sunrise and sunset** are the instants the upper limb touches the horizon:
+  the apparent (refracted) altitude of the Sun's center equals minus its
+  semidiameter, 959.63″/R (15.73′–16.27′ over the year). See
+  [§13.1](#131-definitions) for how this relates to the usual −0.8333° almanac
+  convention.
 - **Transit** is the instant the hour angle of the apparent Sun is zero.
 - **`events::day(date, …)`** searches around local solar noon of `date`, taken
   as 12:00 − longitude/15 h UTC. Rise and set are searched within 12 h either
@@ -551,7 +560,7 @@ UTC ──(+DUT1)──► UT1 ──(+ΔT)──► TT
                   │               └─► apparent λ = λ + Δψ − aberration ─► α, δ            §7, §8
                   └─► GMST ─► + Δψ cos ε ─► GAST ─► + λobs ─► LST ─► H = LST − α        §9
                                                                         │
-            α, δ, H, observer (WGS84) ─► parallax ─► α′, δ′ ─► h, A ─► refraction ─► h_app   §10–§12
+  α, δ, H, observer (WGS84) ─► parallax ─► diurnal aberration ─► α′, δ′ ─► h, A ─► refraction ─► h_app   §10–§12
                                                                                         │
                                                         root finding in time ─► events   §13
 ```
@@ -577,13 +586,14 @@ $$
 where f = 0 is 12:00. The fraction's resolution is at most 2⁻⁵³ day ≈ 10 ps,
 whatever the date.
 
-Construction normalizes any (d, f):
+Construction, and every offset (DUT1, TT − UTC), normalizes (d, f):
 
-1. k = trunc(f); d ← d + k; f ← f − k.
-2. If f < 0: d ← d − 1; f ← f + 1.
+1. k = ⌊f⌋; d ← d + k; f ← f − k.
+2. If f rounded up to exactly 1 (e.g. f = −10⁻¹⁷ gives 1 − 10⁻¹⁷ = 1.0 in
+   double): d ← d + 1; f ← 0. So f ∈ [0, 1) always holds.
 
-Adding an offset (DUT1, ΔT) renormalizes the same way: a fraction ≥ 1 moves
-⌊f⌋ days into d, and a negative fraction borrows ⌈|f|⌉ days.
+`Time::shifted(days)` moves ⌊days⌋ into d and adds only the remainder to f,
+so a shift of any size keeps the full resolution of f.
 
 Differences are formed from the split parts, e.g. days since J2000.0:
 
@@ -621,7 +631,8 @@ date as given, before the month shift.
 
 #### 2.3 Julian Date to civil date
 
-Meeus, Chapter 7, inverse. From (d, f):
+Meeus, Chapter 7, inverse. From (d, f), with every ⌊ ⌋ a true floor (not a
+truncation), so negative Julian Days, before 4713 BC, convert correctly too:
 
 1. g = f + 0.5; Z = d + ⌊g⌋; F = g − ⌊g⌋. This moves the day boundary to
    civil midnight.
@@ -662,24 +673,45 @@ computed from the split form as T = D / 36525, with D from
 |---|---|---|
 | UTC | Input and output | Civil time |
 | UT1 | UTC + DUT1 | Earth rotation (§9) |
-| TT | UT1 + ΔT = UTC + DUT1 + ΔT | Ephemeris, nutation, obliquity (§3–§8) |
+| TT | UTC + (TT − UTC), below | Ephemeris, nutation, obliquity (§3–§8) |
 
-In code the conversions add (DUT1)/86400 or (ΔT + DUT1)/86400 to the UTC
-fraction and renormalize. `Instant<UTC>`, `Instant<UT1>` and `Instant<TT>` are
-distinct types, so passing a UTC instant where TT is required does not compile.
+**TT − UTC** depends on the era:
+
+| Era | TT − UTC | DUT1 when not given |
+|---|---|---|
+| Before 1972-01-01 | DUT1 + ΔT (model, §2.6) | 0: UTC is taken as UT1 |
+| 1972-01-01 to 2027-06-28 | 32.184 s + (TAI − UTC), exact | (TT − UTC) − ΔT, clamped to ±0.9 s |
+| After 2027-06-28 | DUT1 + ΔT (model) | The value on 2027-06-28, held |
+
+- **TAI − UTC** comes from the IERS leap-second table (28 steps, from 10 s on
+  1972-01-01 to 37 s on 2017-01-01), which IERS Bulletin C 72 (July 2026)
+  extends without change to 2027-06-28. `tai_minus_utc()` exposes it.
+- **Estimated DUT1** follows from ΔT = TT − UT1 and exact TT: it is only as good
+  as the ΔT table. It gives −0.176 s on 2020-01-01 (IERS: −0.177 s), +0.074 s on
+  2026-01-30 (Bulletin A: +0.071 s) and +0.324 s on 2000-01-01 (IERS: about
+  +0.355 s). The ±0.9 s clamp is the bound the leap-second system maintains.
+- **Continuity.** Holding the last DUT1 after the table keeps TT continuous at
+  2027-06-28. At 1972-01-01, TT − UTC steps from the model (42.249 s) to the
+  exact 42.184 s, a jump of 0.065 s (0.003″ in the Sun's position).
+- A DUT1 passed by the caller is used as given; in the exact era it changes
+  UT1 but not TT.
+
+In code the conversions add the offset in seconds to the UTC fraction and
+renormalize. `Instant<UTC>`, `Instant<UT1>` and `Instant<TT>` are distinct
+types, so passing a UTC instant where TT is required does not compile.
 
 Sensitivity to time errors:
 
 - The Sun moves 360°/365.2422 d ≈ 0.0411″ per second of time in longitude, so
   a 1 s error in TT moves the computed Sun by only 0.04″.
 - The Earth rotates 15.04″ per second of UT1, so a 1 s error in UT1 shifts
-  hour angles, altitudes and azimuths by up to 15″. With DUT1 = 0 the error is
-  |UT1 − UTC| < 0.9 s, i.e. under 13.5″.
+  hour angles, altitudes and azimuths by up to 15″. The estimated DUT1 is
+  usually within a few hundredths of a second (under 1″); DUT1 = 0 would allow
+  up to 0.9 s (13.5″).
 
-**Leap seconds.** UTC is treated as a uniform scale. A leap second
-(23:59:60) has no distinct representation and maps onto 00:00:00 of the next
-day. TT is derived as UT1 + ΔT rather than through TAI, so leap seconds do not
-enter TT except through the caller's DUT1.
+**Leap seconds.** UTC is treated as a uniform scale within each day. A leap
+second (23:59:60) has no distinct representation and maps onto 00:00:00 of
+the next day.
 
 #### 2.6 ΔT
 
@@ -689,12 +721,18 @@ $$
 y = 2000 + 100\,T_{\mathrm{UTC}},
 $$
 
-counted in Julian years from 2000-01-01 12:00 UTC. It differs from the
-calendar-year fraction by under a day, which is negligible for ΔT. The pieces
-are evaluated in this order; the first one whose range contains y is used.
+counted in Julian years (365.25 days) from 2000-01-01 12:00 UTC. It drifts
+from the Gregorian calendar-year fraction by 0.0075 days per year, 7.5 days by
+3000 AD, and before 1582 it is offset from the Julian-calendar date by about
+13 days. ΔT changes by well under 1 s over such spans, so this is negligible.
+The pieces are evaluated in this order; the first one whose range contains y
+is used.
 
 **Observed values, 2005 ≤ y < 2026.** Annual values at the start of each year
-(IERS/USNO), interpolated linearly between consecutive years:
+(IERS/USNO), interpolated linearly between consecutive years. The 2026 value
+is 69.184 s − (UT1 − UTC) with UT1 − UTC = +0.07 s from IERS Bulletin A
+(January 2026); the earlier values have not been re-checked against their
+source.
 
 | Year | ΔT (s) | Year | ΔT (s) | Year | ΔT (s) |
 |---|---|---|---|---|---|
@@ -703,26 +741,25 @@ are evaluated in this order; the first one whose range contains y is used.
 | 2007 | 65.15 | 2015 | 67.64 | 2023 | 69.18 |
 | 2008 | 65.46 | 2016 | 68.10 | 2024 | 69.10 |
 | 2009 | 65.78 | 2017 | 68.59 | 2025 | 69.07 |
-| 2010 | 66.07 | 2018 | 68.97 | 2026 | 69.06 (provisional) |
+| 2010 | 66.07 | 2018 | 68.97 | 2026 | 69.11 |
 | 2011 | 66.32 | 2019 | 69.22 | | |
 | 2012 | 66.60 | 2020 | 69.36 | | |
 
-**Near future, 2026 ≤ y < 2050.** A linear bridge from the last value to the
-Espenak–Meeus estimate of 93 s at 2050:
+**Near future, 2026 ≤ y < 2050.** A bridge from the last observed value that
+starts flat, as observed ΔT has been flat or slightly falling since 2021 (the
+Earth's rotation has recently sped up, against the long-term trend), and
+curves up to the Espenak–Meeus 93 s at 2050 so the next piece stays
+continuous. With u = (y − 2026)/24:
 
 $$
-\Delta T = 69.06 + (93 - 69.06)\,\frac{y - 2026}{24}.
+\Delta T = 69.11 + (93 - 69.11)\,u^2 .
 $$
 
-This bridge rises by about 1 s per year, whereas observed ΔT has been flat or
-slightly falling since 2021 (see the table): the Earth's rotation has recently
-sped up, against the long-term trend the fits assume. Since
-ΔT = 32.184 s + (TAI − UTC) − (UT1 − UTC), with TAI − UTC = 37 s since 2017 and
-|UT1 − UTC| < 0.9 s, the current value stays near 69.1 s until a leap second
-is introduced, while the bridge already gives about 69.8 s by late 2026. The
-resulting error in the Sun's position is under 0.03″ (0.0411″ per second of
-ΔT, [§2.5](#25-time-scales)); hour angles are unaffected, since they depend on
-UT1, not ΔT.
+It gives 69.77 s in 2030 and 77.24 s in 2040. Any value past the observed
+table is a prediction; for comparison, the Espenak–Meeus 2005–2050 polynomial
+already overestimates 2025 by about 5.4 s (74.47 s against 69.07 s). Until
+2027-06-28 the bridge does not affect TT (exact from leap seconds), only the
+estimated DUT1 (§2.5).
 
 **Prediction, 2050 ≤ y < 2150.** With u = (y − 1820)/100:
 
@@ -750,7 +787,8 @@ $$
 In the 1800–1860 fit the large terms nearly cancel, and the t⁷ term is
 essential: without it the fit diverges by thousands of seconds by 1860.
 
-ΔT cannot be overridden through the API; see [Limitations](#limitations).
+ΔT itself cannot be overridden through the API; supplying DUT1 fixes UT1, and
+from 1972 to 2027-06-28 TT is exact regardless (§2.5).
 
 ### 3. Heliocentric Earth: VSOP87D
 
@@ -778,7 +816,8 @@ series, with no truncation:
 | | | | | | | | **2,425** |
 
 - L is returned unwrapped: its t¹ block contains the mean motion
-  (≈ 6283.08 rad per millennium), so L grows to about 2 × 10⁴ rad at 3000 AD.
+  (≈ 6283.08 rad per millennium), so |L| reaches about 6.3 × 10³ rad at
+  3000 AD and 1.9 × 10⁴ rad at 1000 BC.
   It is reduced to [0°, 360°) only when converted to the Sun's longitude.
 - The fastest term in the Earth series has C = 327,574 rad per millennium, a
   period of 7.0 days, and an amplitude between 10⁻¹⁰ and 10⁻⁸ rad. Every term
@@ -819,6 +858,20 @@ it and converting back with atan2 gives the same angles, with more rounding.
 β is tiny (the Earth's heliocentric latitude on the ecliptic of date stays
 below 1.3″ over 1000 BC–3000 AD), but it is kept throughout.
 
+**FK5 frame.** VSOP87 is referred to the dynamical ecliptic and equinox, which
+differ slightly from the FK5 system that the IAU 1982 sidereal time (§9) is
+defined in. The position is rotated to FK5 (Meeus 25.9), with T in Julian
+centuries of TT:
+
+$$
+\lambda' = \lambda - 1.397^\circ T - 0.00031^\circ T^2,\qquad
+\Delta\lambda = -0.09033'',\qquad
+\Delta\beta = 0.03916''\,(\cos\lambda' - \sin\lambda').
+$$
+
+`sun::geometric` returns the FK5 position, so the Sun's right ascension and
+GMST are in the same frame.
+
 ### 5. Nutation
 
 Nutation is the short-period motion of the Earth's rotation axis, caused
@@ -826,9 +879,11 @@ mainly by the Moon's torque on the equatorial bulge. It shifts the true
 equinox along the ecliptic by Δψ (nutation in longitude) and tilts the true
 equator by Δε (nutation in obliquity).
 
-Spp uses the IAU 1980 theory, truncated to its 20 largest terms (Meeus,
-Table 22.A). The five fundamental luni-solar arguments, in degrees, with T in
-Julian centuries of TT, each reduced modulo 360°:
+Spp uses the IAU 1980 theory with its full series of 106 terms. Through the
+Chebyshev cache (see [Numerical methods](#chebyshev-earth-state)) the full
+series costs nothing more per query than a truncated one would. The five
+fundamental luni-solar arguments (Meeus 22.1), in degrees, with T in Julian
+centuries of TT, each reduced modulo 360°:
 
 | Argument | Meaning | Value (°) |
 |---|---|---|
@@ -845,37 +900,124 @@ $$
 \Delta\varepsilon = \sum_i (C_i + C'_i\,T)\,\cos\theta_i ,
 $$
 
-with coefficients in units of 0.0001″:
+with coefficients in units of 0.0001″. The full series has 106 terms,
+listed here in the order of the source table (Seidelmann 1992, Table
+3.222.1), exactly as compiled into `src/model/iau1980_terms.hpp`:
 
-| d | m | m′ | f | ω | S | S′ | C | C′ |
-|---|---|---|---|---|---|---|---|---|
-| 0 | 0 | 0 | 0 | 1 | −171996 | −174.2 | 92025 | 8.9 |
-| −2 | 0 | 0 | 2 | 2 | −13187 | −1.6 | 5736 | −3.1 |
-| 0 | 0 | 0 | 2 | 2 | −2274 | −0.2 | 977 | −0.5 |
-| 0 | 0 | 0 | 0 | 2 | 2062 | 0.2 | −895 | 0.5 |
-| 0 | 1 | 0 | 0 | 0 | 1426 | −3.4 | 54 | −0.1 |
-| 0 | 0 | 1 | 0 | 0 | 712 | 0.1 | −7 | 0 |
-| −2 | 1 | 0 | 2 | 2 | −517 | 1.2 | 224 | −0.6 |
-| 0 | 0 | 0 | 2 | 1 | −386 | −0.4 | 200 | 0 |
-| 0 | 0 | 1 | 2 | 2 | −301 | 0 | 129 | −0.1 |
-| −2 | −1 | 0 | 2 | 2 | 217 | −0.5 | −95 | 0.3 |
-| −2 | 0 | 1 | 0 | 0 | −158 | 0 | 0 | 0 |
-| −2 | 0 | 0 | 2 | 1 | 129 | 0.1 | −70 | 0 |
-| 0 | 0 | −1 | 2 | 2 | 123 | 0 | −53 | 0 |
-| 2 | 0 | 0 | 0 | 0 | 63 | 0 | 0 | 0 |
-| 0 | 0 | 1 | 0 | 1 | 63 | 0.1 | −33 | 0 |
-| 2 | 0 | −1 | 2 | 2 | −59 | 0 | 26 | 0 |
-| 0 | 0 | −1 | 0 | 1 | −58 | −0.1 | 32 | 0 |
-| 0 | 0 | 1 | 2 | 1 | −51 | 0 | 27 | 0 |
-| −2 | 0 | 2 | 0 | 0 | 48 | 0 | 0 | 0 |
-| 0 | 0 | −2 | 2 | 1 | 46 | 0 | −24 | 0 |
+| # | d | m | m′ | f | ω | S | S′ | C | C′ |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 0 | 0 | 0 | 0 | 1 | −171996 | −174.2 | 92025 | 8.9 |
+| 2 | 0 | 0 | 0 | 0 | 2 | 2062 | 0.2 | −895 | 0.5 |
+| 3 | 0 | 0 | −2 | 2 | 1 | 46 | 0 | −24 | 0 |
+| 4 | 0 | 0 | 2 | −2 | 0 | 11 | 0 | 0 | 0 |
+| 5 | 0 | 0 | −2 | 2 | 2 | −3 | 0 | 1 | 0 |
+| 6 | −1 | −1 | 1 | 0 | 0 | −3 | 0 | 0 | 0 |
+| 7 | −2 | −2 | 0 | 2 | 1 | −2 | 0 | 1 | 0 |
+| 8 | 0 | 0 | 2 | −2 | 1 | 1 | 0 | 0 | 0 |
+| 9 | −2 | 0 | 0 | 2 | 2 | −13187 | −1.6 | 5736 | −3.1 |
+| 10 | 0 | 1 | 0 | 0 | 0 | 1426 | −3.4 | 54 | −0.1 |
+| 11 | −2 | 1 | 0 | 2 | 2 | −517 | 1.2 | 224 | −0.6 |
+| 12 | −2 | −1 | 0 | 2 | 2 | 217 | −0.5 | −95 | 0.3 |
+| 13 | −2 | 0 | 0 | 2 | 1 | 129 | 0.1 | −70 | 0 |
+| 14 | −2 | 0 | 2 | 0 | 0 | 48 | 0 | 1 | 0 |
+| 15 | −2 | 0 | 0 | 2 | 0 | −22 | 0 | 0 | 0 |
+| 16 | 0 | 2 | 0 | 0 | 0 | 17 | −0.1 | 0 | 0 |
+| 17 | 0 | 1 | 0 | 0 | 1 | −15 | 0 | 9 | 0 |
+| 18 | −2 | 2 | 0 | 2 | 2 | −16 | 0.1 | 7 | 0 |
+| 19 | 0 | −1 | 0 | 0 | 1 | −12 | 0 | 6 | 0 |
+| 20 | 2 | 0 | −2 | 0 | 1 | −6 | 0 | 3 | 0 |
+| 21 | −2 | −1 | 0 | 2 | 1 | −5 | 0 | 3 | 0 |
+| 22 | −2 | 0 | 2 | 0 | 1 | 4 | 0 | −2 | 0 |
+| 23 | −2 | 1 | 0 | 2 | 1 | 4 | 0 | −2 | 0 |
+| 24 | −1 | 0 | 1 | 0 | 0 | −4 | 0 | 0 | 0 |
+| 25 | −2 | 1 | 2 | 0 | 0 | 1 | 0 | 0 | 0 |
+| 26 | 2 | 0 | 0 | −2 | 1 | 1 | 0 | 0 | 0 |
+| 27 | 2 | 1 | 0 | −2 | 0 | −1 | 0 | 0 | 0 |
+| 28 | 0 | 1 | 0 | 0 | 2 | 1 | 0 | 0 | 0 |
+| 29 | 1 | 0 | −1 | 0 | 1 | 1 | 0 | 0 | 0 |
+| 30 | −2 | 1 | 0 | 2 | 0 | −1 | 0 | 0 | 0 |
+| 31 | 0 | 0 | 0 | 2 | 2 | −2274 | −0.2 | 977 | −0.5 |
+| 32 | 0 | 0 | 1 | 0 | 0 | 712 | 0.1 | −7 | 0 |
+| 33 | 0 | 0 | 0 | 2 | 1 | −386 | −0.4 | 200 | 0 |
+| 34 | 0 | 0 | 1 | 2 | 2 | −301 | 0 | 129 | −0.1 |
+| 35 | −2 | 0 | 1 | 0 | 0 | −158 | 0 | −1 | 0 |
+| 36 | 0 | 0 | −1 | 2 | 2 | 123 | 0 | −53 | 0 |
+| 37 | 2 | 0 | 0 | 0 | 0 | 63 | 0 | −2 | 0 |
+| 38 | 0 | 0 | 1 | 0 | 1 | 63 | 0.1 | −33 | 0 |
+| 39 | 0 | 0 | −1 | 0 | 1 | −58 | −0.1 | 32 | 0 |
+| 40 | 2 | 0 | −1 | 2 | 2 | −59 | 0 | 26 | 0 |
+| 41 | 0 | 0 | 1 | 2 | 1 | −51 | 0 | 27 | 0 |
+| 42 | 2 | 0 | 0 | 2 | 2 | −38 | 0 | 16 | 0 |
+| 43 | 0 | 0 | 2 | 0 | 0 | 29 | 0 | −1 | 0 |
+| 44 | −2 | 0 | 1 | 2 | 2 | 29 | 0 | −12 | 0 |
+| 45 | 0 | 0 | 2 | 2 | 2 | −31 | 0 | 13 | 0 |
+| 46 | 0 | 0 | 0 | 2 | 0 | 26 | 0 | −1 | 0 |
+| 47 | 0 | 0 | −1 | 2 | 1 | 21 | 0 | −10 | 0 |
+| 48 | 2 | 0 | −1 | 0 | 1 | 16 | 0 | −8 | 0 |
+| 49 | −2 | 0 | 1 | 0 | 1 | −13 | 0 | 7 | 0 |
+| 50 | 2 | 0 | −1 | 2 | 1 | −10 | 0 | 5 | 0 |
+| 51 | −2 | 1 | 1 | 0 | 0 | −7 | 0 | 0 | 0 |
+| 52 | 0 | 1 | 0 | 2 | 2 | 7 | 0 | −3 | 0 |
+| 53 | 0 | −1 | 0 | 2 | 2 | −7 | 0 | 3 | 0 |
+| 54 | 2 | 0 | 1 | 2 | 2 | −8 | 0 | 3 | 0 |
+| 55 | 2 | 0 | 1 | 0 | 0 | 6 | 0 | 0 | 0 |
+| 56 | −2 | 0 | 2 | 2 | 2 | 6 | 0 | −3 | 0 |
+| 57 | 2 | 0 | 0 | 0 | 1 | −6 | 0 | 3 | 0 |
+| 58 | 2 | 0 | 0 | 2 | 1 | −7 | 0 | 3 | 0 |
+| 59 | −2 | 0 | 1 | 2 | 1 | 6 | 0 | −3 | 0 |
+| 60 | −2 | 0 | 0 | 0 | 1 | −5 | 0 | 3 | 0 |
+| 61 | 0 | −1 | 1 | 0 | 0 | 5 | 0 | 0 | 0 |
+| 62 | 0 | 0 | 2 | 2 | 1 | −5 | 0 | 3 | 0 |
+| 63 | −2 | 1 | 0 | 0 | 0 | −4 | 0 | 0 | 0 |
+| 64 | 0 | 0 | 1 | −2 | 0 | 4 | 0 | 0 | 0 |
+| 65 | 1 | 0 | 0 | 0 | 0 | −4 | 0 | 0 | 0 |
+| 66 | 0 | 1 | 1 | 0 | 0 | −3 | 0 | 0 | 0 |
+| 67 | 0 | 0 | 1 | 2 | 0 | 3 | 0 | 0 | 0 |
+| 68 | 0 | −1 | 1 | 2 | 2 | −3 | 0 | 1 | 0 |
+| 69 | 2 | −1 | −1 | 2 | 2 | −3 | 0 | 1 | 0 |
+| 70 | 0 | 0 | −2 | 0 | 1 | −2 | 0 | 1 | 0 |
+| 71 | 0 | 0 | 3 | 2 | 2 | −3 | 0 | 1 | 0 |
+| 72 | 2 | −1 | 0 | 2 | 2 | −3 | 0 | 1 | 0 |
+| 73 | 0 | 1 | 1 | 2 | 2 | 2 | 0 | −1 | 0 |
+| 74 | −2 | 0 | −1 | 2 | 1 | −2 | 0 | 1 | 0 |
+| 75 | 0 | 0 | 2 | 0 | 1 | 2 | 0 | −1 | 0 |
+| 76 | 0 | 0 | 1 | 0 | 2 | −2 | 0 | 1 | 0 |
+| 77 | 0 | 0 | 3 | 0 | 0 | 2 | 0 | 0 | 0 |
+| 78 | 1 | 0 | 0 | 2 | 2 | 2 | 0 | −1 | 0 |
+| 79 | 0 | 0 | −1 | 0 | 2 | 1 | 0 | −1 | 0 |
+| 80 | −4 | 0 | 1 | 0 | 0 | −1 | 0 | 0 | 0 |
+| 81 | 2 | 0 | −2 | 2 | 2 | 1 | 0 | −1 | 0 |
+| 82 | 4 | 0 | −1 | 2 | 2 | −2 | 0 | 1 | 0 |
+| 83 | −4 | 0 | 2 | 0 | 0 | −1 | 0 | 0 | 0 |
+| 84 | −2 | 1 | 1 | 2 | 2 | 1 | 0 | −1 | 0 |
+| 85 | 2 | 0 | 1 | 2 | 1 | −1 | 0 | 1 | 0 |
+| 86 | 4 | 0 | −2 | 2 | 2 | −1 | 0 | 1 | 0 |
+| 87 | 0 | 0 | −1 | 4 | 2 | 1 | 0 | 0 | 0 |
+| 88 | −2 | −1 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
+| 89 | −2 | 0 | 2 | 2 | 1 | 1 | 0 | −1 | 0 |
+| 90 | 2 | 0 | 2 | 2 | 2 | −1 | 0 | 0 | 0 |
+| 91 | 2 | 0 | 1 | 0 | 1 | −1 | 0 | 0 | 0 |
+| 92 | −2 | 0 | 0 | 4 | 2 | 1 | 0 | 0 | 0 |
+| 93 | −2 | 0 | 3 | 2 | 2 | 1 | 0 | 0 | 0 |
+| 94 | −2 | 0 | 1 | 2 | 0 | −1 | 0 | 0 | 0 |
+| 95 | 0 | 1 | 0 | 2 | 1 | 1 | 0 | 0 | 0 |
+| 96 | 2 | −1 | −1 | 0 | 1 | 1 | 0 | 0 | 0 |
+| 97 | 0 | 0 | 0 | −2 | 1 | −1 | 0 | 0 | 0 |
+| 98 | −1 | 0 | 0 | 2 | 2 | −1 | 0 | 0 | 0 |
+| 99 | 2 | 1 | 0 | 0 | 0 | −1 | 0 | 0 | 0 |
+| 100 | −2 | 0 | 1 | −2 | 0 | −1 | 0 | 0 | 0 |
+| 101 | 0 | −1 | 0 | 2 | 1 | −1 | 0 | 0 | 0 |
+| 102 | −2 | 1 | 1 | 0 | 1 | −1 | 0 | 0 | 0 |
+| 103 | 2 | 0 | 1 | −2 | 0 | −1 | 0 | 0 | 0 |
+| 104 | 2 | 0 | 2 | 0 | 0 | 1 | 0 | 0 | 0 |
+| 105 | 4 | 0 | 0 | 2 | 2 | −1 | 0 | 0 | 0 |
+| 106 | 1 | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 0 |
 
 - The dominant term, with argument Ω, has the 18.6-year period of the lunar
   node and an amplitude of 17.2″ in Δψ and 9.2″ in Δε.
 - The next largest, 2F − 2D + 2Ω, has a half-year period (1.3″ in Δψ).
-- The fastest term in the table, M′ + 2F + Ω, has a period of 9.1 days.
-- The terms omitted from the full IAU 1980 series are each below about
-  0.004″; their combined effect is a few hundredths of an arcsecond.
+- The fastest term, 2D + 2M′ + 2F + 2Ω (row 90), has a period of 4.68 days
+  and an amplitude of 0.0001″.
 
 ### 6. Obliquity of the ecliptic
 
@@ -1041,9 +1183,25 @@ $$
 
 and α′ = α + Δα, reduced to [0°, 360°). The distance is kept.
 
-Because Δα is proportional to sin H, it vanishes at H = 0: the topocentric and
-geocentric transits are the same instant. The parallax shift acts almost
-entirely on altitude, lowering the Sun by about π cos h.
+Because Δα is proportional to sin H, it vanishes at H = 0: parallax does not
+move the transit. The parallax shift acts almost entirely on altitude,
+lowering the Sun by about π cos h.
+
+**Diurnal aberration.** The observer moves eastward with the Earth's
+rotation at v = ω a ρ cos φ′ (ω = 7.292115 × 10⁻⁵ rad/s). To first order in
+v/c this displaces the apparent direction toward the east point by
+
+$$
+\Delta\alpha = \kappa\,\rho\cos\varphi'\,\frac{\cos H}{\cos\delta},\qquad
+\Delta\delta = \kappa\,\rho\cos\varphi'\,\sin H\,\sin\delta,\qquad
+\kappa = \frac{\omega a}{c} = 0.320'',
+$$
+
+applied to the topocentric position, with H its hour angle. The effect is at
+about 0.35″ for the Sun (0.32″/cos δ at the equator). It shifts the
+topocentric transit by up to about 0.023 s against the geocentric one, which
+defines `events::transit`
+([§13.1](#131-definitions)).
 
 ### 11. Horizontal coordinates
 
@@ -1079,7 +1237,11 @@ to about 1′ at 45°.
 **As implemented.** Given a geometric altitude h<sub>g</sub> (degrees),
 pressure P (mbar) and temperature T<sub>C</sub> (°C):
 
-1. If h<sub>g</sub> < −2°, no refraction is applied.
+1. **Pressure.** When `Atmosphere::pressure_mbar` is unset, the standard
+   1010 mbar is scaled to the observer's elevation h<sub>e</sub> (metres) with
+   the International Standard Atmosphere:
+   P = 1010 (1 − 2.25577 × 10⁻⁵ h<sub>e</sub>)<sup>5.25588</sup>, e.g. 792 mbar
+   at 2,000 m. A pressure given by the caller is used as is.
 2. The standard-atmosphere refraction is scaled by
 
 $$
@@ -1087,14 +1249,21 @@ k = \frac{P}{1010}\cdot\frac{283}{273 + T_C}.
 $$
 
 3. The Saemundsson (1986) expression (Meeus 16.4) gives the refraction as a
-   function of the true (geometric) altitude:
+   function of the true (geometric) altitude; the constant 0.0019279′ makes it
+   exactly 0 at the zenith:
 
 $$
-R(h_g) = k \cdot \frac{1.02'}{\tan\!\left(h_g + \dfrac{10.3^\circ}{h_g + 5.11^\circ}\right)},
+R(h_g) = k \left( \frac{1.02'}{\tan\!\left(h_g + \dfrac{10.3^\circ}{h_g + 5.11^\circ}\right)} + 0.0019279' \right),
 \qquad h_a = h_g + R(h_g).
 $$
 
    It is evaluated once, directly; no iteration is involved.
+4. **Below the horizon.** The formula is applied down to h<sub>g</sub> = −2°,
+   where it gives 44.54′. Below that the refraction fades linearly to 0 at
+   −4°: R(h<sub>g</sub>) = R(−2°) · (h<sub>g</sub> + 4°)/2°. The apparent
+   altitude is therefore continuous and increasing everywhere, so every target
+   altitude is reachable by `events::crossing`, and altitudes of −4° and lower
+   (all twilights) stay geometric.
 
 `Atmosphere::refraction = false` returns the geometric altitude.
 
@@ -1102,11 +1271,14 @@ With the default atmosphere (1010 mbar, 10 °C):
 
 | Geometric altitude | Refraction |
 |---|---|
+| −3° | 22.27′ (fade) |
+| −2° | 44.54′ |
 | 0° | 28.98′ |
-| 5° | 9.67′ |
+| 5° | 9.68′ |
 | 10° | 5.41′ |
 | 20° | 2.74′ |
-| 45° | 1.01′ |
+| 45° | 1.015′ |
+| 90° | 0 |
 
 An apparent altitude of 0° corresponds to 34.43′ of refraction, in agreement
 with the standard 34′ horizon refraction used by almanacs.
@@ -1119,37 +1291,40 @@ Refraction does not change the azimuth.
 
 | Event | Condition on the Sun's center |
 |---|---|
-| Sunrise, sunset | Apparent (refracted, topocentric) altitude = −16′ |
+| Sunrise, sunset | Apparent (refracted, topocentric) altitude = −(959.63″/R) |
 | Civil twilight | Apparent altitude = −6° |
 | Nautical twilight | Apparent altitude = −12° |
 | Astronomical twilight | Apparent altitude = −18° |
 | Any event | Apparent altitude = any target, via `events::crossing` |
 | Transit | Hour angle of the apparent Sun = 0 |
 
-- **−16′** is the Sun's semidiameter, so the event is the upper limb touching
-  the horizon. The semidiameter is fixed; the real value varies between about
-  15.7′ (July) and 16.3′ (January) with the Earth–Sun distance.
-- **Twilights** lie below −2°, where no refraction is applied
+- **959.63″/R** is the Sun's apparent semidiameter at distance R (AU), so the
+  event is the upper limb touching the horizon. It varies from 15.73′ in July
+  to 16.27′ in January; `events::day` takes it at transit
+  (`sun::semidiameter_deg`). The constant `events::upper_limb_deg` (−16′) is
+  its mean, for use with `events::crossing`.
+- **Twilights** lie at −4° and lower, where no refraction is applied
   ([§12](#12-atmospheric-refraction)), so they are geometric altitudes.
-- **Transit** uses the geocentric hour angle. It is identical to the
-  topocentric one, because the parallax shift in right ascension vanishes at
-  H = 0 ([§10](#10-topocentric-parallax)).
+- **Transit** uses the geocentric hour angle. Parallax does not move it, and
+  diurnal aberration moves the topocentric transit by at most about 0.023 s
+  ([§10](#10-topocentric-parallax)).
 
 **Relation to the almanac convention.** Almanacs define sunrise and sunset
 as the geometric altitude of the center at −0.8333°: the 34′ of refraction at
 the horizon plus the 16′ semidiameter, both taken as fixed. Spp instead
-refracts the center itself, which sits 16′ below the horizon, where the
-refraction is larger. With the default atmosphere its condition corresponds
-to a geometric altitude of −0.8956° (37.73′ of refraction). So Spp's sunrise
-comes earlier and its sunset later than the almanac convention, symmetrically
-(measured, sea level, 2026):
+refracts the center itself, which sits a semidiameter below the horizon, where
+the refraction is larger. With the default atmosphere and a 16′ semidiameter,
+its condition corresponds to a geometric altitude of −0.8956° (37.74′ of
+refraction). So Spp's sunrise comes earlier and its sunset later than the
+almanac convention, symmetrically (measured, sea level, 2026, with the actual
+semidiameter):
 
 | Place and date | Sunrise | Sunset |
 |---|---|---|
-| Equator, March equinox | −14.9 s | +14.9 s |
-| 48.86° N (Paris), June solstice | −29.0 s | +29.0 s |
-| 48.86° N (Paris), December solstice | −28.1 s | +28.1 s |
-| 60° N, June solstice | −52.4 s | +52.4 s |
+| Equator, March equinox | −15.2 s | +15.2 s |
+| 48.86° N (Paris), June solstice | −26.6 s | +26.6 s |
+| 48.86° N (Paris), December solstice | −30.4 s | +30.4 s |
+| 60° N, June solstice | −48.0 s | +48.0 s |
 
 The difference grows with latitude because the Sun crosses the horizon at a
 shallower angle. To reproduce the almanac convention exactly, solve for the
@@ -1163,16 +1338,17 @@ geometric altitude −0.8333° with refraction disabled:
 1. **First guess.** Local solar noon is taken as 12:00 − λ<sub>obs</sub>/15 h
    UTC on the given date, split into whole hours, minutes and seconds.
 2. **Transit** is refined from it ([§13.3](#133-transit)).
-3. **Classification.** h<sub>noon</sub> is the apparent altitude at transit,
+3. **Target.** The limb altitude is −s, with s = 959.63″/R at transit.
+4. **Classification.** h<sub>noon</sub> is the apparent altitude at transit,
    and h<sub>before</sub>, h<sub>after</sub> the apparent altitudes 12 h
    before and after it, approximating the two lower culminations.
-   - h<sub>noon</sub> < −16′: `PolarNight`, duration 0 h.
-   - h<sub>before</sub> > −16′ and h<sub>after</sub> > −16′: `PolarDay`,
+   - h<sub>noon</sub> < −s: `PolarNight`, duration 0 h.
+   - h<sub>before</sub> > −s and h<sub>after</sub> > −s: `PolarDay`,
      duration 24 h.
    - Otherwise `Normal`.
-4. **Rise and set** are the crossings of −16′ before and after transit
+5. **Rise and set** are the crossings of −s before and after transit
    ([§13.4](#134-crossings)).
-5. **Duration** is the time above the horizon within the 24 h centered on
+6. **Duration** is the time above the horizon within the 24 h centered on
    transit: set − rise, in hours, computed from the split JDs. Rise and set
    may fall on the UTC dates on either side of `date`.
 
@@ -1180,8 +1356,8 @@ geometric altitude −0.8333° with refraction disabled:
 but does not set again within 12 h of transit; on the first day after it, the
 Sun sets but was already up 12 h before transit. Such a day is `Normal` with
 only one of `rise` and `set`, and the missing end of the window counts as
-daylight. For example, at 70° N on 2026-07-27 the Sun sets at 23:45 UTC with
-no sunrise, and the duration is 23.64 h.
+daylight. For example, at 70° N on 2026-07-27 the Sun sets at 23:44:30 UTC
+with no sunrise, and the duration is 23.63 h.
 
 #### 13.3 Transit
 
@@ -1259,7 +1435,8 @@ iteration stops when the bracket is narrower than
 iterations, and returns the bracket's midpoint.
 
 Measured on random dates and observers, the refined instants satisfy the event
-condition to better than 10⁻⁵″ in altitude.
+condition to better than 10⁻⁵″ in altitude. Because the apparent altitude is
+continuous in time (§12), this holds for any target altitude.
 
 ---
 
@@ -1267,7 +1444,7 @@ condition to better than 10⁻⁵″ in altitude.
 
 ### Chebyshev earth state
 
-Evaluating VSOP87D (2,425 cosines) and the nutation series (20 sines and
+Evaluating VSOP87D (2,425 cosines) and the nutation series (106 sines and
 cosines, 5 arguments) dominates the cost of a solar position. All five
 quantities, L, B, R, Δψ and Δε, are smooth functions of time, so Spp replaces
 them with Chebyshev interpolants over short segments.
@@ -1320,7 +1497,8 @@ m > ωh. Taking the worst cases for h = 8 days:
   ωh ≈ 7.2. Its coefficient beyond degree 24 is of order 10⁻¹⁹ rad.
 - Terms above 10⁻⁸ rad have periods of at least 9.4 days (ωh ≤ 5.4) and
   decay even faster.
-- The fastest nutation term (9.1 days, 0.005″) is negligible after degree 24.
+- The fastest nutation term (4.68 days, 0.0001″) has ωh ≈ 10.7; its
+  coefficient beyond degree 24 is of order 10⁻¹¹″.
 
 The measured error confirms it (see [Accuracy](#accuracy)). The fit is exactly
 as close to the true series as direct double-precision evaluation, and the
@@ -1358,16 +1536,16 @@ split GMST is more accurate than the direct form.
 | Source | Size | Affects |
 |---|---|---|
 | VSOP87D theory (complete series) | About 1″ over several thousand years around J2000 (authors' estimate) | Solar longitude, latitude, distance |
-| Dynamical vs FK5 equinox | 0.09″, not applied ([Limitations](#limitations)) | Solar longitude |
-| Nutation: IAU 1980 truncated to 20 terms | A few hundredths of an arcsecond | Apparent place, sidereal time |
+| Nutation: the IAU 1980 theory itself (full 106-term series) | A few hundredths of an arcsecond against modern nutation (IAU 2000A) | Apparent place, sidereal time |
 | Aberration: none in latitude, no barycentric motion of the Sun | Below 0.01″ | Apparent place |
 | Equation of the equinoxes without the 1994 terms | Below 0.003″ | Sidereal time |
-| ΔT, observed era (2005–2025) | About 0.2 s → 0.01″ in position | Solar position |
-| ΔT, linear bridge after 2026 ([§2.6](#26-δt)) | About 0.7 s high by late 2026 → 0.03″ | Solar position |
-| ΔT, future and pre-telescopic | Seconds to hours → 0.041″ per second in position | Solar position |
-| DUT1 = 0 (default) | Up to 0.9 s → up to 13.5″ | Hour angle, altitude, azimuth, event times |
-| Sunrise/sunset definition vs the almanac convention ([§13.1](#131-definitions)) | Sunrise 15–52 s earlier (sunset later) at 0°–60° latitude | Rise/set |
-| Fixed 16′ semidiameter | ±0.3′ → a few seconds | Rise/set |
+| Polar motion, not applied | Up to about 0.5″ (15 m) in the observer's coordinates; about 0.03 s in rotation | Hour angle, altitude, event times |
+| TT, 1972 to 2027-06-28 | Exact (leap seconds, §2.5) | Solar position |
+| TT outside that span: ΔT model | Seconds (recent past, near future) to hours (antiquity) → 0.041″ per second | Solar position |
+| ΔT prediction after 2026 ([§2.6](#26-δt)) | Unknown and growing with time | Solar position; estimated DUT1 |
+| Estimated DUT1, 1972 to 2027 ([§2.5](#25-time-scales)) | Typically a few hundredths of a second (0.03 s at 2000.0) → under 1″ | Hour angle, altitude, azimuth, event times |
+| DUT1 = 0 before 1972 | UTC is taken as UT1 | Hour angle, altitude, azimuth, event times |
+| Sunrise/sunset definition vs the almanac convention ([§13.1](#131-definitions)) | Sunrise 15–48 s earlier (sunset later) at 0°–60° latitude | Rise/set |
 | Real atmosphere vs model | Often minutes near the horizon | Rise/set, low altitudes |
 | Numerical error | See below | Everything |
 
@@ -1384,12 +1562,12 @@ Numerical error is far below the model error:
   | L | 1.2e-5″ | 1.2e-5″ |
   | B | 3.3e-11″ | 3.3e-11″ |
   | R | 1.1e-13 AU | 9.0e-14 AU |
-  | Δψ | 1.8e-10″ | 2.1e-10″ |
+  | Δψ | 1.8e-10″ | 2.0e-10″ |
   | Δε | 8.4e-11″ | 8.2e-11″ |
 
   The remaining error of both is the rounding of phases B + C·t, which reach
   about 10⁶ rad at the ends of the range. The larger figure for L reflects
-  that L itself reaches 2 × 10⁴ rad.
+  that |L| itself reaches 1.9 × 10⁴ rad (at 1000 BC).
 - **GMST** is within 1.9e-7″ of the formula evaluated in exact rational
   arithmetic ([§9](#9-sidereal-time-and-hour-angle)).
 - **Events.** Transits converge to below 10⁻⁹° of hour angle (~0.2 µs). Rise,
@@ -1406,9 +1584,9 @@ filled for the instants they use:
 
 | Operation | Time |
 |---|---|
-| `sun::apparent` | 0.15 µs |
-| `events::altitude_deg` (includes the apparent Sun) | 0.35 µs |
-| `events::day` (transit, rise, set) | 6.6 µs |
+| `sun::apparent` | 0.17 µs |
+| `events::altitude_deg` (includes the apparent Sun) | 0.43 µs |
+| `events::day` (transit, rise, set) | 7.5 µs |
 | `spp year` (365 days, including process start-up) | ~60 ms |
 
 Filling one 16-day cache segment costs 25 direct series evaluations, about
@@ -1421,7 +1599,7 @@ Filling one 16-day cache segment costs 25 direct series evaluations, about
 
 | Target | What it checks |
 |---|---|
-| `spp_cache_check` | The Chebyshev cache and direct double evaluation, both against the same series evaluated in 80-bit extended precision, at random instants over 1000 BC–3000 AD, densely inside segments, and on both sides of segment boundaries. The cache passes when it is no further from the truth than direct evaluation |
+| `spp_cache_check` | The Chebyshev cache and direct double evaluation, both against the same series evaluated in 80-bit extended precision, at random instants over 1000 BC–3000 AD, densely inside segments, and on both sides of segment boundaries. The cache passes when its worst error is at most twice that of direct evaluation (rounding noise); the program prints PASS or FAIL and exits with 0 or 1. It refuses to compile where `long double` is no wider than `double` |
 | `spp_bench` | Throughput of `sun::apparent`, `events::altitude_deg` and `events::day` over a year × latitude grid |
 | `spp_figures` | Renders the figures in `docs/images/` as SVG from the library's results: daylight and twilight, day length by latitude, analemma, sun paths, azimuth spirals |
 
@@ -1469,29 +1647,37 @@ Seasonal++/
 
 - **The Sun only.** Moon and planets are not implemented. The `spp::model`
   layout is designed to take them, e.g. further VSOP87 bodies.
-- **Nutation.** The truncated IAU 1980 series limits the apparent place to a
-  few hundredths of an arcsecond. IAU 2000A/B would be the upgrade path.
-- **Frame.** Positions are referred to the dynamical ecliptic and equinox of
-  date (VSOP87D). The small rotation to the FK5 system (Meeus 32.3:
-  ΔL = −0.09033″, ΔB = 0.03916″ (cos L′ − sin L′) with
-  L′ = L − 1.397°T − 0.00031°T²) is not applied. There is no ICRS/GCRS
-  pipeline, precession-nutation matrix model or CIO-based sidereal time.
+- **Nutation.** The IAU 1980 theory, even in full, differs from modern
+  nutation by a few hundredths of an arcsecond. IAU 2000A/B would be the
+  upgrade path.
+- **Frame.** Positions are referred to the FK5 equator and equinox of date
+  (VSOP87D rotated to FK5, §4). There is no ICRS/GCRS pipeline,
+  precession-nutation matrix model or CIO-based sidereal time.
 - **Sidereal time** omits the 1994 complementary terms of the equation of the
   equinoxes (below 0.003″).
+- **Polar motion** is not applied: the observer's coordinates are taken as
+  given, which differs from the true terrestrial frame by up to about 0.5″
+  (15 m), about 0.03 s in rotation. It needs IERS data, which the API has no
+  input for.
 - **ΔT** always comes from the built-in model; the API has no way to supply
-  another value. The observed table ends with a provisional value for 2026,
-  and later years are predictions; the 2026–2050 bridge is already about
-  0.7 s above the observed value ([§2.6](#26-δt)). **DUT1** can be supplied
-  per call.
-- **Refraction** is a standard-atmosphere model. It applies no refraction
-  below −2° geometric altitude, and real horizon refraction varies from night
-  to night.
-- **Semidiameter** is fixed at 16′ instead of following the Earth–Sun
-  distance.
+  another value. It only affects TT outside 1972 to 2027-06-28, where TT is
+  exact. Past the observed table it is a prediction whose error grows with
+  time ([§2.6](#26-δt)). **DUT1** can be supplied per call; otherwise it is
+  estimated from 1972 on and taken as 0 before.
+- **Leap-second table** is known up to 2027-06-28 (IERS Bulletin C 72). A
+  later leap second, if any, needs the table updated in `src/core/time.cpp`.
+- **Refraction** is a standard-atmosphere model. Between −2° and −4° geometric
+  altitude it is a linear fade, not physics, and real horizon refraction varies
+  from night to night. Temperature is not scaled with elevation.
 - **Day classification** samples the altitude 12 h before and after transit
   instead of finding the exact lower culminations ([§13.2](#132-one-day)).
 - **Rise/set with a raised horizon** (mountains, observer height above
-  terrain) is not modelled; elevation only affects parallax.
+  terrain) is not modelled: elevation sets the parallax and the default
+  pressure, but the dip of the horizon is not applied. A crossing of the
+  dipped horizon can be solved with `events::crossing` and the target
+  altitude −(semidiameter + dip).
+- **Compilers.** Developed and tested with GCC 15 only. The Clang and MSVC
+  flags in `cmake/SppFlags.cmake` are untested.
 
 ---
 

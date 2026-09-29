@@ -9,13 +9,15 @@ namespace spp::model::espenak_meeus {
 namespace {
 
 // Observed Delta T (TT - UT1) at the start of each year, seconds (IERS / USNO).
+// 2026: 69.184 s - (UT1 - UTC), with UT1 - UTC = +0.07 s from IERS Bulletin A
+// (January 2026).
 constexpr int kTableStartYear = 2005;
 constexpr std::array kObserved = {
     64.69, 64.85, 65.15, 65.46, 65.78,   // 2005-2009
     66.07, 66.32, 66.60, 66.91, 67.28,   // 2010-2014
     67.64, 68.10, 68.59, 68.97, 69.22,   // 2015-2019
     69.36, 69.36, 69.29, 69.18, 69.10,   // 2020-2024
-    69.07, 69.06,                        // 2025, 2026 (provisional)
+    69.07, 69.11,                        // 2025, 2026
 };
 constexpr int kTableEndYear = kTableStartYear + static_cast<int>(kObserved.size()) - 1;
 
@@ -33,11 +35,13 @@ double delta_t_seconds(double y) {
         return v0 + frac * (v1 - v0);
     }
 
-    // Near future: linear bridge from the last observation to ~93 s at 2050.
+    // Near future: from the last observation with zero slope (observed ΔT has
+    // been flat since 2021), curving up to the Espenak-Meeus 93 s at 2050 so the
+    // next piece stays continuous. A prediction: the uncertainty grows with time.
     if (kTableEndYear <= y && y < 2050) {
         const double last = kObserved.back();
-        const double span = 2050.0 - kTableEndYear;
-        return last + (93.0 - last) * (y - kTableEndYear) / span;
+        const double u = (y - kTableEndYear) / (2050.0 - kTableEndYear);
+        return last + (93.0 - last) * u * u;
     }
 
     // Prediction era: parabola plus the continuity correction at 2050.

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include "spp/core/calendar.hpp"
@@ -30,35 +31,46 @@ struct Instant {
 };
 
 // An instant carried in UTC, plus the Earth-orientation knowledge (DUT1)
-// needed to derive UT1 and TT from it.
+// needed to derive UT1 from it.
+//
+// DUT1 = UT1 - UTC can be supplied (IERS Bulletin A). When it isn't, it is
+// estimated: from 1972 on, where TT - UTC = 32.184 s + (TAI - UTC) is exact,
+// as (TT - UTC) - ΔT; before 1972, as 0.
 class Time {
 public:
     // Normalizes frac into [0, 1), carrying whole days into `day`.
-    static Time from_jd(std::int64_t day, double frac, double dut1_s = 0.0);
-    static Time from_civil(const CivilDateTime& utc, double dut1_s = 0.0);
+    static Time from_jd(std::int64_t day, double frac, std::optional<double> dut1_s = std::nullopt);
+    static Time from_civil(const CivilDateTime& utc, std::optional<double> dut1_s = std::nullopt);
     static Time from_utc(int year, int month, int day,
                          int hour = 0, int minute = 0, double second = 0.0,
-                         double dut1_s = 0.0);
+                         std::optional<double> dut1_s = std::nullopt);
 
     Instant<UTC> utc() const;
     Instant<UT1> ut1() const;   // UTC + DUT1
-    Instant<TT> tt() const;     // UTC + DUT1 + ΔT
+    Instant<TT> tt() const;     // UTC + (TT - UTC); see tt_minus_utc()
 
-    double delta_t() const;     // ΔT = TT - UT1, seconds
+    double tt_minus_utc() const;   // seconds: exact from leap seconds when known, else DUT1 + ΔT
+    double delta_t() const;        // ΔT = TT - UT1, seconds
     double dut1() const { return dut1_s_; }
+    bool dut1_estimated() const { return !dut1_given_; }
     double decimal_year() const;
 
-    Time shifted(double days) const;   // same DUT1, renormalized
+    Time shifted(double days) const;   // same DUT1 (or re-estimated), renormalized
 
     CivilDateTime to_civil() const;    // UTC, unrounded seconds
     std::string iso_utc() const;       // "YYYY-MM-DDTHH:MM:SSZ", rounded to the second
 
 private:
-    Time(std::int64_t day, double frac, double dut1_s);
+    Time(std::int64_t day, double frac, std::optional<double> dut1_s);
 
     std::int64_t day_;
     double frac_;
     double dut1_s_;
+    bool dut1_given_;
 };
+
+// TAI - UTC in seconds at a UTC instant, from the IERS leap-second table, or
+// nullopt before 1972-01-01 and after the date up to which the table is known.
+std::optional<double> tai_minus_utc(Instant<UTC> t);
 
 }  // namespace spp

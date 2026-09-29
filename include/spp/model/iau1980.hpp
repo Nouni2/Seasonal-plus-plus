@@ -1,8 +1,7 @@
 #pragma once
 
-// IAU 1980 nutation theory, truncated to the 20 largest terms
-// (Meeus, Astronomical Algorithms, Table 22.A). Truncation error is below
-// ~0.05" in Δψ and ~0.02" in Δε.
+// IAU 1980 nutation theory, full series (106 terms; Seidelmann 1992,
+// Explanatory Supplement to the Astronomical Almanac).
 namespace spp::model::iau1980 {
 
 struct Nutation {

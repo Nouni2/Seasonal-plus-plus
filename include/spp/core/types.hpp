@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 namespace spp {
 
 // Ecliptic of date: longitude λ, latitude β, radius vector.
@@ -31,7 +33,9 @@ struct Observer {
 };
 
 struct Atmosphere {
-    double pressure_mbar = 1010.0;
+    // Surface pressure. When unset, the standard 1010 mbar scaled to the
+    // observer's elevation (sky::at_elevation).
+    std::optional<double> pressure_mbar = std::nullopt;
     double temp_c = 10.0;
     bool refraction = true;
 };

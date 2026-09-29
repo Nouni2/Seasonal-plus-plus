@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <print>
 #include <random>
 #include <span>
@@ -23,6 +24,11 @@ namespace {
 
 using ld = long double;
 namespace vsop = spp::model::vsop87d;
+
+// Where long double is no wider than double (MSVC, ARM64), the reference would
+// be no more precise than what it checks.
+static_assert(std::numeric_limits<ld>::digits > std::numeric_limits<double>::digits,
+              "cache_check needs an extended-precision long double");
 
 constexpr ld kPi = 3.141592653589793238462643383279502884L;
 
@@ -129,8 +135,15 @@ int main() {
 
     std::println("{} instants, 1000 BC .. 3000 AD; error vs extended-precision evaluation", n);
     std::println("{:<6}{:>18}{:>18}{:>16}", "", "direct (double)", "cached", "cache worse at");
-    for (const Stat& s : stats)
-        std::println("{:<6}{:>13.3e} {:<4}{:>13.3e} {:<4}{:>10.1f} %", s.name, s.direct * s.scale, s.unit,
-                     s.cached * s.scale, s.unit, 100.0 * double(s.worse) / double(n));
-    return 0;
+    // Pass: the cache is no further from the truth than direct evaluation, up
+    // to rounding noise (a factor of 2 on the worst case).
+    bool pass = true;
+    for (const Stat& s : stats) {
+        const bool ok = s.cached <= 2.0 * s.direct;
+        pass = pass && ok;
+        std::println("{:<6}{:>13.3e} {:<4}{:>13.3e} {:<4}{:>10.1f} %{}", s.name, s.direct * s.scale, s.unit,
+                     s.cached * s.scale, s.unit, 100.0 * double(s.worse) / double(n), ok ? "" : "   FAIL");
+    }
+    std::println("{}", pass ? "PASS" : "FAIL");
+    return pass ? 0 : 1;
 }

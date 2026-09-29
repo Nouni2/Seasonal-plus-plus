@@ -72,11 +72,14 @@ spp_apply_flags(spp)
 # Executables
 # ------------------------------------------------------------------------------
 # The library is C++20; executables use C++23 for std::print, which needs
-# stdc++exp on GCC 15.
+# libstdc++exp with GCC.
 function(spp_add_executable target)
     add_executable(${target} ${ARGN})
     set_target_properties(${target} PROPERTIES CXX_STANDARD 23)
-    target_link_libraries(${target} PRIVATE spp::spp stdc++exp)
+    target_link_libraries(${target} PRIVATE spp::spp)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_link_libraries(${target} PRIVATE stdc++exp)
+    endif()
     spp_apply_flags(${target})
 endfunction()
 

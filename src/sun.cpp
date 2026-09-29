@@ -1,5 +1,7 @@
 #include "spp/sun.hpp"
 
+#include <cmath>
+
 #include "earth_state.hpp"
 #include "spp/core/angles.hpp"
 #include "spp/sky.hpp"
@@ -10,7 +12,14 @@ Ecliptic geometric(Instant<TT> t) {
     // The geocentric Sun is the heliocentric Earth (VSOP87D) reflected through
     // the origin: λ = L + 180°, β = -B, same distance.
     const auto e = detail::earth_state(t);
-    return {norm360(e.l_rad * rad2deg + 180.0), -(e.b_rad * rad2deg), e.r_au};
+    const double lon = norm360(e.l_rad * rad2deg + 180.0);
+    const double lat = -(e.b_rad * rad2deg);
+
+    // From the VSOP87 dynamical ecliptic and equinox to FK5 (Meeus 25.9):
+    // λ' = λ - 1.397°T - 0.00031°T², Δλ = -0.09033", Δβ = 0.03916" (cos λ' - sin λ').
+    const double T = t.centuries_since_j2000();
+    const double lp = (lon - 1.397 * T - 0.00031 * T * T) * deg2rad;
+    return {norm360(lon - 0.09033 / 3600.0), lat + 0.03916 / 3600.0 * (std::cos(lp) - std::sin(lp)), e.r_au};
 }
 
 Ecliptic apparent_ecliptic(Instant<TT> t, const earth::Nutation& n) {
@@ -28,6 +37,8 @@ Equatorial apparent(Instant<TT> t, const earth::Nutation& n) {
 }
 
 Equatorial apparent(Instant<TT> t) { return apparent(t, earth::nutation(t)); }
+
+double semidiameter_deg(Instant<TT> t) { return sun_radius_arcsec / detail::earth_state(t).r_au / 3600.0; }
 
 Horizontal horizontal(const Time& t, const Observer& obs, const Atmosphere& atm) {
     const auto tt = t.tt();

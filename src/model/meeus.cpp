@@ -37,19 +37,21 @@ CalendarDay calendar_from_jd(std::int64_t day, double frac) {
     const std::int64_t Z = day + static_cast<std::int64_t>(std::floor(g));
     const double F = g - std::floor(g);
 
+    // Floors throughout (not truncation), so negative Julian Days also convert.
+    const auto ifloor = [](double x) { return static_cast<std::int64_t>(std::floor(x)); };
+
     std::int64_t A = Z;
     if (Z >= jd_gregorian_start) {
-        const auto alpha = static_cast<std::int64_t>((static_cast<double>(Z) - 1867216.25) / 36524.25);
-        A = Z + 1 + alpha - static_cast<std::int64_t>(static_cast<double>(alpha) / 4.0);
+        const std::int64_t alpha = ifloor((static_cast<double>(Z) - 1867216.25) / 36524.25);
+        A = Z + 1 + alpha - ifloor(static_cast<double>(alpha) / 4.0);
     }
 
     const std::int64_t B = A + 1524;
-    const auto C = static_cast<std::int64_t>((static_cast<double>(B) - 122.1) / 365.25);
-    const auto D = static_cast<std::int64_t>(365.25 * static_cast<double>(C));
-    const auto E = static_cast<std::int64_t>(static_cast<double>(B - D) / 30.6001);
+    const std::int64_t C = ifloor((static_cast<double>(B) - 122.1) / 365.25);
+    const std::int64_t D = ifloor(365.25 * static_cast<double>(C));
+    const std::int64_t E = ifloor(static_cast<double>(B - D) / 30.6001);
 
-    const double day_with_frac =
-        static_cast<double>(B - D - static_cast<std::int64_t>(30.6001 * static_cast<double>(E))) + F;
+    const double day_with_frac = static_cast<double>(B - D - ifloor(30.6001 * static_cast<double>(E))) + F;
     const double day_floor = std::floor(day_with_frac);
 
     const int month = static_cast<int>(E < 14 ? E - 1 : E - 13);
