@@ -1,0 +1,5 @@
+# CMake package for Spp: find_package(Spp) provides the target spp::spp.
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/SppTargets.cmake")
+check_required_components(Spp)

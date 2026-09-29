@@ -14,7 +14,6 @@ inline constexpr double hours2deg = 15.0;
 // Epochs and time units
 inline constexpr long long jd_j2000_day = 2451545;   // JD 2451545.0 = 2000-01-01 12:00 TT
 inline constexpr double days_per_century = 36525.0;
-inline constexpr double days_per_millennium = 365250.0;
 inline constexpr double seconds_per_day = 86400.0;
 inline constexpr long long jd_gregorian_start = 2299161;   // 1582-10-15
 

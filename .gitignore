@@ -1,5 +1,6 @@
 # Build output (CMake presets write to build/<preset>/)
 /build/
+/install/
 
 # clangd index and compilation database
 /.cache/

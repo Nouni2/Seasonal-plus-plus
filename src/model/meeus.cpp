@@ -27,7 +27,7 @@ SplitJd jd_from_civil(const CivilDateTime& c) {
                            + c.day + B - 1524.0;
 
     // JD starts at noon: civil midnight is JD .5
-    const double day_fraction = (c.hour / 24.0) + (c.minute / 1440.0) + (c.second / 86400.0);
+    const double day_fraction = (c.hour / 24.0) + (c.minute / 1440.0) + (c.second / seconds_per_day);
     return {static_cast<std::int64_t>(jd_noon), day_fraction - 0.5};
 }
 

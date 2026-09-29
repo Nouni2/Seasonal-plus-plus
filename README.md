@@ -177,12 +177,61 @@ CMake options:
 | Option | Default | Effect |
 |---|---|---|
 | `SPP_NATIVE` | `OFF` | Adds `-march=native` |
-| `SPP_BUILD_APPS` | `ON` | Builds `spp` and, when GLFW/GLEW/GLM are found, `spp_spiral` |
-| `SPP_BUILD_VALIDATION` | `ON` | Builds the `spp_cache_check` accuracy tool |
+| `SPP_BUILD_APPS` | top level | Builds `spp` and, when GLFW/GLEW/GLM are found, `spp_spiral` |
+| `SPP_BUILD_VALIDATION` | top level | Builds the `spp_cache_check` accuracy tool |
 | `SPP_BUILD_BENCH` | `OFF` | Builds the `spp_bench` benchmark |
 | `SPP_BUILD_FIGURES` | `OFF` | Builds `spp_figures`, which renders the README figures |
+| `SPP_INSTALL` | top level | Generates the install rules and the CMake package |
 
-Other CMake projects link the library as `spp::spp`.
+"Top level" means `ON` when Spp is built on its own and `OFF` when it is
+included by another project, which then gets only the library.
+
+### Using Spp from another project
+
+Spp builds as a static library, `libspp.a`, or `libsppd.a` for Debug. Install it
+together with its headers and a CMake package:
+
+```sh
+cmake --preset release && cmake --build --preset release && cmake --install build/release
+cmake --preset debug   && cmake --build --preset debug   && cmake --install build/debug
+```
+
+The presets install into `install/` at the repository root (ignored by git).
+Both configurations can share this prefix:
+
+```
+install/
+├── include/spp/...               public headers
+├── lib/libspp.a, lib/libsppd.a   Release and Debug archives
+├── lib/cmake/Spp/                SppConfig.cmake, version file, targets
+└── share/licenses/Spp/LICENSE
+```
+
+The consuming project finds the package and links the `spp::spp` target. The
+target carries the include path and the C++20 requirement:
+
+```cmake
+find_package(Spp 0.1 CONFIG REQUIRED)
+target_link_libraries(app PRIVATE spp::spp)
+```
+
+Point CMake at the prefix when configuring, for example with
+`-DCMAKE_PREFIX_PATH=<path to Seasonal++>/install`. The library has no
+dependencies outside the C++ standard library.
+
+Alternatively, add the source tree directly, which builds only the library:
+
+```cmake
+add_subdirectory(<path to Seasonal++> spp)
+target_link_libraries(app PRIVATE spp::spp)
+```
+
+The [floating-point flags](#floating-point-policy) are private to the library's
+own sources and are not passed to consumers. There is one exception: the inline
+angle helpers `norm360` and `wrap180` in `spp/core/angles.hpp`. If a program
+uses them in a file built with `-ffast-math`, the linker keeps only one copy of
+each, and that copy may be the fast-math one. Build such files without
+fast-math.
 
 The build first compiles `tools/vsop_gen`, which turns `data/VSOP87D.ear` into
 `build/<preset>/generated/spp/vsop87d_earth_terms.inc` (see
@@ -1618,7 +1667,9 @@ Seasonal++/
 ├── CMakeLists.txt, CMakePresets.json
 ├── README.md, LICENSE
 ├── .editorconfig, .gitattributes, .gitignore
-├── cmake/SppFlags.cmake          compiler flags and floating-point policy
+├── cmake/
+│   ├── SppFlags.cmake            compiler flags and floating-point policy
+│   └── SppConfig.cmake.in        CMake package template (find_package(Spp))
 ├── data/VSOP87D.ear              VSOP87D Earth series (source data)
 ├── tools/
 │   ├── vsop_gen.cpp              .ear → exact C++ tables, run at build time

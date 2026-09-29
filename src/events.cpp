@@ -40,7 +40,7 @@ double hour_angle_deg(const Geocentric& g, double lon_east_deg) {
 
 Time approx_noon(const CivilDate& date, double lon_east_deg, std::optional<double> dut1_s) {
     // 12:00 - lon/15 in UTC, split into hours, minutes and seconds.
-    const double approx_noon_utc_hour = 12.0 - (lon_east_deg / 15.0);
+    const double approx_noon_utc_hour = 12.0 - (lon_east_deg / hours2deg);
     const int h = static_cast<int>(approx_noon_utc_hour);
     const double rem_minutes = (approx_noon_utc_hour - h) * 60.0;
     const int m = static_cast<int>(rem_minutes);

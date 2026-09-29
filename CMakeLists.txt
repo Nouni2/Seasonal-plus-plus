@@ -9,11 +9,14 @@ project(Spp
 # ------------------------------------------------------------------------------
 # Options
 # ------------------------------------------------------------------------------
-option(SPP_NATIVE           "Tune for the build machine (-march=native)"                                   OFF)
-option(SPP_BUILD_APPS       "Build the spp command-line tool and the spp_spiral viewer"                     ON)
-option(SPP_BUILD_VALIDATION "Build the spp_cache_check accuracy tool"                                       ON)
-option(SPP_BUILD_BENCH      "Build the spp_bench benchmark"                                                OFF)
-option(SPP_BUILD_FIGURES    "Build spp_figures, which renders the README figures"                          OFF)
+# Apps, tools and install rules default to ON only when Spp is the top-level
+# project, so add_subdirectory / FetchContent users get just the library.
+option(SPP_NATIVE           "Tune for the build machine (-march=native)"                 OFF)
+option(SPP_BUILD_APPS       "Build the spp command-line tool and the spp_spiral viewer"  ${PROJECT_IS_TOP_LEVEL})
+option(SPP_BUILD_VALIDATION "Build the spp_cache_check accuracy tool"                    ${PROJECT_IS_TOP_LEVEL})
+option(SPP_BUILD_BENCH      "Build the spp_bench benchmark"                              OFF)
+option(SPP_BUILD_FIGURES    "Build spp_figures, which renders the README figures"        OFF)
+option(SPP_INSTALL          "Generate install rules and the CMake package"               ${PROJECT_IS_TOP_LEVEL})
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,6 +24,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+include(GNUInstallDirs)
 include(cmake/SppFlags.cmake)
 
 # ------------------------------------------------------------------------------
@@ -63,9 +67,15 @@ add_library(spp STATIC
 add_library(spp::spp ALIAS spp)
 
 target_include_directories(spp
-    PUBLIC  ${PROJECT_SOURCE_DIR}/include
-    PRIVATE ${SPP_GENERATED_DIR}
+    PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE
+        ${SPP_GENERATED_DIR}
 )
+target_compile_features(spp PUBLIC cxx_std_20)
+# Debug and release archives can share one install prefix: libsppd.a / libspp.a.
+set_target_properties(spp PROPERTIES DEBUG_POSTFIX d)
 spp_apply_flags(spp)
 
 # ------------------------------------------------------------------------------
@@ -114,4 +124,30 @@ endif()
 if(SPP_BUILD_FIGURES)
     spp_add_executable(spp_figures tools/figures.cpp)
     target_include_directories(spp_figures PRIVATE ${PROJECT_SOURCE_DIR}/apps/common)
+endif()
+
+# ------------------------------------------------------------------------------
+# Install: the static library, its public headers and a CMake package.
+# Consumers:
+#     find_package(Spp 0.1 CONFIG REQUIRED)
+#     target_link_libraries(app PRIVATE spp::spp)
+# ------------------------------------------------------------------------------
+if(SPP_INSTALL)
+    include(CMakePackageConfigHelpers)
+    set(SPP_CMAKE_DIR ${CMAKE_INSTALL_LIBDIR}/cmake/Spp)
+
+    install(TARGETS spp EXPORT SppTargets ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+    install(DIRECTORY include/spp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    install(EXPORT SppTargets NAMESPACE spp:: DESTINATION ${SPP_CMAKE_DIR})
+
+    configure_package_config_file(cmake/SppConfig.cmake.in
+        ${PROJECT_BINARY_DIR}/SppConfig.cmake
+        INSTALL_DESTINATION ${SPP_CMAKE_DIR})
+    write_basic_package_version_file(${PROJECT_BINARY_DIR}/SppConfigVersion.cmake
+        COMPATIBILITY SameMinorVersion)
+    install(FILES
+        ${PROJECT_BINARY_DIR}/SppConfig.cmake
+        ${PROJECT_BINARY_DIR}/SppConfigVersion.cmake
+        DESTINATION ${SPP_CMAKE_DIR})
+    install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/Spp)
 endif()

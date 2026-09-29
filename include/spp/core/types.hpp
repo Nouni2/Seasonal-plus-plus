@@ -2,6 +2,8 @@
 
 #include <optional>
 
+#include "spp/core/constants.hpp"
+
 namespace spp {
 
 // Ecliptic of date: longitude λ, latitude β, radius vector.
@@ -17,7 +19,7 @@ struct Equatorial {
     double dec_deg;
     double dist_au = 1.0;
 
-    double ra_hours() const { return ra_deg / 15.0; }
+    double ra_hours() const { return ra_deg / hours2deg; }
 };
 
 // Local horizon. Azimuth is measured from North, increasing East.
