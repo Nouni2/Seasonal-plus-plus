@@ -3,6 +3,7 @@
 </p>
 
 <p align="center">
+  <a href="#changelog"><img src="https://img.shields.io/badge/version-1.0.0-F2A93B?style=flat-square" alt="Version 1.0.0"></a>
   <a href="#building"><img src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=cplusplus&logoColor=white" alt="C++20"></a>
   <a href="#building"><img src="https://img.shields.io/badge/CMake-3.28%2B-064F8C?style=flat-square&logo=cmake&logoColor=white" alt="CMake 3.28+"></a>
   <a href="#3-heliocentric-earth-vsop87d"><img src="https://img.shields.io/badge/ephemeris-VSOP87D-E07B39?style=flat-square" alt="VSOP87D ephemeris"></a>
@@ -74,6 +75,7 @@ duration  16.1959 h
 - [Project layout](#project-layout)
 - [Limitations](#limitations)
 - [References](#references)
+- [Changelog](#changelog)
 - [License](#license)
 
 ---
@@ -211,7 +213,7 @@ The consuming project finds the package and links the `spp::spp` target. The
 target carries the include path and the C++20 requirement:
 
 ```cmake
-find_package(Spp 0.1 CONFIG REQUIRED)
+find_package(Spp 1.0 CONFIG REQUIRED)
 target_link_libraries(app PRIVATE spp::spp)
 ```
 
@@ -1750,6 +1752,95 @@ Seasonal++/
 - IERS / USNO: observed values of ΔT and DUT1.
 - NIMA TR8350.2, *Department of Defense World Geodetic System 1984*: WGS84
   ellipsoid.
+
+---
+
+## Changelog
+
+Spp follows [Semantic Versioning](https://semver.org). From 1.0.0 on, a
+release that breaks the public API (the headers under `include/spp/`) raises
+the major version. `find_package(Spp 1.0)` accepts any 1.x release.
+
+### 1.0.0 (2026-09-29)
+
+The first stable release.
+
+**Library**
+
+- Apparent position of the Sun from the VSOP87D Earth series (2,425 terms,
+  compiled from the source tables at build time), referred to FK5. Includes the
+  full IAU 1980 nutation (106 terms), Laskar's obliquity, and annual aberration.
+- The time scales UTC, UT1 and TT are distinct types, and mixing them is a
+  compile error. TT − UTC is exact from the IERS leap-second table between 1972
+  and 2027-06-28. Outside that span, ΔT comes from the Espenak–Meeus
+  polynomials. DUT1 can be supplied, or it is estimated.
+- Sidereal time: GMST (IAU 1982) and GAST, evaluated in split precision.
+- Observer corrections: WGS84 parallax, diurnal aberration, horizontal
+  coordinates, and Saemundsson refraction with the pressure scaled to the
+  observer's elevation.
+- Events: transit, sunrise and sunset, crossings of any altitude (twilights),
+  day length, and polar day and polar night. Sunrise and sunset use the Sun's
+  actual semidiameter.
+- A Chebyshev cache of the Earth state, whose accuracy `spp_cache_check`
+  verifies against extended precision.
+- Strict IEEE 754 double precision: no fast-math and no FMA contraction.
+
+**Packaging**
+
+- A static library, `libspp.a` (`libsppd.a` for Debug), that installs with its
+  headers and a CMake package: `find_package(Spp)` provides the `spp::spp`
+  target. `add_subdirectory` also works and builds only the library.
+
+**Tools**
+
+- `spp`, a command-line front end: the Sun at an instant, a day's events, or a
+  year of events as CSV.
+- `spp_spiral`: sunrise and sunset azimuths over a year (OpenGL).
+- `spp_cache_check`, `spp_bench` and `spp_figures`.
+
+#### Changes from 0.1.0
+
+Version 0.1.0 was the development version. Code written against it is
+affected by the following changes.
+
+- **DUT1 is estimated by default.** `Time::from_jd`, `Time::from_civil`,
+  `Time::from_utc` and `events::day` take DUT1 as `std::optional<double>`.
+  Leaving it out now estimates it, where 0.1.0 used 0. Passing a number works
+  as before. `Time::dut1_estimated()` reports which one applies.
+- **TT comes from the leap-second table.** `Time::tt()` is UTC + (TT − UTC)
+  (`Time::tt_minus_utc()`, `tai_minus_utc()`), exact from 1972 on. In 0.1.0 it
+  was UTC + DUT1 + ΔT.
+- **The default pressure follows the elevation.** `Atmosphere::pressure_mbar`
+  is `std::optional<double>`. When it is unset, the standard pressure at the
+  observer's elevation applies (`sky::at_elevation`), where 0.1.0 used a fixed
+  1010 mbar.
+- **Sunrise and sunset use the actual semidiameter**, 959.63″/R
+  (`sun::semidiameter_deg`). 0.1.0 used a fixed 16′; the two differ by up to
+  0.27′ of altitude.
+- **Refraction** applies Saemundsson's formula directly to the geometric
+  altitude, including its zenith constant. Below the horizon it applies down
+  to −2° and then fades out by −4°, so the apparent altitude is continuous.
+  0.1.0 solved the formula iteratively and left a gap below −2°.
+- **More accurate positions**: the full 106-term nutation, where 0.1.0 used
+  the 20 largest terms; the FK5 correction; and diurnal aberration.
+- **ΔT**: the 2026 value comes from IERS Bulletin A (69.11 s), and the model
+  is continuous from 2026 to 2050.
+- **Time arithmetic**: `Time::shifted` is exact over large offsets, the day
+  fraction always stays in [0, 1), and calendar conversion is correct for
+  negative Julian Dates.
+- **Added**: `sun::horizontal`, `sun::semidiameter_deg`, `sky::observe`,
+  `sky::diurnal_aberration`, `sky::at_elevation`, `Time::tt_minus_utc`,
+  `Time::dut1_estimated`, `tai_minus_utc`, and the constants
+  `earth_rotation_rad_s`, `speed_of_light_m_s` and `sun_radius_arcsec`.
+- **Removed**: `norm2pi`; `days_per_millennium`; `model::meeus::gmst_deg(double)`,
+  replaced by the split-precision `gmst_deg(whole_days, frac)`; and the
+  `SPP_EXACT` build option.
+- **Tools**: `spp year` prints full ISO timestamps where 0.1.0 printed only the
+  time of day, because events can fall on the neighbouring UTC date.
+  `spp sun` also shows DUT1. `spp_cache_check` exits with status 1 on failure.
+- **Build**: compiler flags are selected per compiler (GCC, Clang, MSVC; only
+  GCC is tested). The apps, tools and install rules are off by default when
+  Spp is included by another project.
 
 ---
 

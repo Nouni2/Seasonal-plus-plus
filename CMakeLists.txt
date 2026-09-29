@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(Spp
-    VERSION 0.1.0
+    VERSION 1.0.0
     DESCRIPTION "High-precision solar positional astronomy library"
     LANGUAGES CXX
 )
@@ -129,7 +129,7 @@ endif()
 # ------------------------------------------------------------------------------
 # Install: the static library, its public headers and a CMake package.
 # Consumers:
-#     find_package(Spp 0.1 CONFIG REQUIRED)
+#     find_package(Spp 1.0 CONFIG REQUIRED)
 #     target_link_libraries(app PRIVATE spp::spp)
 # ------------------------------------------------------------------------------
 if(SPP_INSTALL)
@@ -144,7 +144,7 @@ if(SPP_INSTALL)
         ${PROJECT_BINARY_DIR}/SppConfig.cmake
         INSTALL_DESTINATION ${SPP_CMAKE_DIR})
     write_basic_package_version_file(${PROJECT_BINARY_DIR}/SppConfigVersion.cmake
-        COMPATIBILITY SameMinorVersion)
+        COMPATIBILITY SameMajorVersion)
     install(FILES
         ${PROJECT_BINARY_DIR}/SppConfig.cmake
         ${PROJECT_BINARY_DIR}/SppConfigVersion.cmake
