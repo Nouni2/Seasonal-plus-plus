@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="920" height="640" viewBox="0 0 920 640" font-family="Segoe UI, Helvetica, Arial, sans-serif">
 <rect x="0.5" y="0.5" width="919" height="639" rx="12" fill="#0d1117" stroke="#30363d"/>
 <text x="24" y="34" font-size="17" font-weight="600" fill="#e6edf3">Sunrise and sunset azimuth through the year</text>
-<text x="24" y="54" font-size="12.5" fill="#656d76">Paris, 2026. Angle = azimuth of the Sun at the event (N in red), height = day of the year (1 January at the bottom), as in spp_spiral.</text>
+<text x="24" y="54" font-size="12.5" fill="#8b949e">Paris, 2026. Angle = azimuth of the Sun at the event (N in red), height = day of the year (1 January at the bottom), as in spp_spiral.</text>
 <line x1="237.4" y1="500.7" x2="246.0" y2="500.8" stroke="#6b7280" stroke-width="1" stroke-linecap="round" opacity="0.27"/>
 <line x1="228.7" y1="500.9" x2="237.4" y2="500.7" stroke="#6b7280" stroke-width="1" stroke-linecap="round" opacity="0.27"/>
 <line x1="246.0" y1="500.8" x2="254.6" y2="501.0" stroke="#6b7280" stroke-width="1" stroke-linecap="round" opacity="0.27"/>

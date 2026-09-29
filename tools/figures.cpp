@@ -13,6 +13,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -35,10 +36,13 @@ const spp::Observer kGreenwich{51.4769, -0.0005, 46.0};
 // ---------------------------------------------------------------------------
 
 constexpr const char* kFont = "Segoe UI, Helvetica, Arial, sans-serif";
-constexpr const char* kInk = "#1f2328";
-constexpr const char* kMuted = "#656d76";
-constexpr const char* kGrid = "#e6e9ec";
-constexpr const char* kAxis = "#8c959f";
+// Dark theme, matching the banner and dark code-hosting themes.
+constexpr const char* kCard = "#0d1117";
+constexpr const char* kBorder = "#30363d";
+constexpr const char* kInk = "#e6edf3";
+constexpr const char* kMuted = "#8b949e";
+constexpr const char* kGrid = "#21262d";
+constexpr const char* kAxis = "#484f58";
 
 class Svg {
 public:
@@ -163,8 +167,9 @@ void month_axis(Svg& svg, const Frame& f, const Year& y) {
     for (std::size_t m = 0; m < 12; ++m) {
         const double start = y.month_start[m];
         const double end = m + 1 < 12 ? y.month_start[m + 1] : days + 1;
-        svg.add(R"(<line x1="{:.1f}" y1="{:.1f}" x2="{:.1f}" y2="{:.1f}" stroke="{}"/>)", f.x(start), f.top, f.x(start),
-                f.bottom(), kGrid);
+        // Translucent, so it reads on both the plot background and the filled bands.
+        svg.add(R"(<line x1="{:.1f}" y1="{:.1f}" x2="{:.1f}" y2="{:.1f}" stroke="#ffffff" stroke-opacity="0.10"/>)",
+                f.x(start), f.top, f.x(start), f.bottom());
         svg.add(R"(<text x="{:.1f}" y="{:.1f}" font-size="11" fill="{}" text-anchor="middle">{}</text>)",
                 f.x((start + end) / 2), f.bottom() + 18, kMuted, names[m]);
     }
@@ -237,12 +242,12 @@ void render_daylight(const std::filesystem::path& dir) {
     }
 
     Svg svg(920, 540);
-    card(svg, "#ffffff", "#d0d7de", kInk, "Daylight and twilight through the year",
+    card(svg, kCard, kBorder, kInk, "Daylight and twilight through the year",
          std::format("Paris (48.86° N, 2.35° E), {}. Hours in UTC. Every boundary is an event solved by spp::events.",
                      kYear));
     const Frame f{70, 76, 820, 380, 1, static_cast<double>(days + 1), 0, 24};
     clip_to(svg, f, "daylight-clip");
-    svg.add(R"(<rect x="{:.1f}" y="{:.1f}" width="{:.1f}" height="{:.1f}" fill="#0f1f3d"/>)", f.left, f.top, f.width,
+    svg.add(R"(<rect x="{:.1f}" y="{:.1f}" width="{:.1f}" height="{:.1f}" fill="#0a1628"/>)", f.left, f.top, f.width,
             f.height);
     svg.add(R"svg(<g clip-path="url(#daylight-clip)">)svg");
     for (std::size_t l = 0; l < levels.size(); ++l) {
@@ -269,12 +274,12 @@ void render_daylight(const std::filesystem::path& dir) {
             svg.add(R"(<line x1="{:.1f}" y1="{:.1f}" x2="{:.1f}" y2="{:.1f}" stroke="#c26a00" stroke-width="1.6" stroke-dasharray="6 4"/>)",
                     x, ly - 4, x + 22, ly - 4);
         else
-            svg.add(R"(<rect x="{:.1f}" y="{:.1f}" width="22" height="12" rx="2" fill="{}" stroke="#d0d7de"/>)", x,
+            svg.add(R"(<rect x="{:.1f}" y="{:.1f}" width="22" height="12" rx="2" fill="{}" stroke="#484f58"/>)", x,
                     ly - 10, color);
         svg.add(R"(<text x="{:.1f}" y="{:.1f}" font-size="12" fill="{}">{}</text>)", x + 30, ly, kInk, name);
         x += 44 + 7.0 * static_cast<double>(std::char_traits<char>::length(name));
     };
-    swatch("#0f1f3d", "Night", false);
+    swatch("#0a1628", "Night", false);
     for (const auto& l : levels) swatch(l.color, l.name, false);
     swatch("", "Solar noon", true);
 
@@ -289,11 +294,11 @@ void render_day_length(const std::filesystem::path& dir) {
     const Year y = year_dates(kYear);
     const int days = static_cast<int>(y.dates.size());
     const std::array<double, 9> lats{0, 15, 30, 45, 55, 60, 65, 70, 80};
-    const std::array<const char*, 9> colors{"#d4572a", "#e0822f", "#d9a62e", "#8aa83a", "#3f9b6e",
-                                            "#2b8a9e", "#3070b8", "#4f55b8", "#6b3fa0"};
+    const std::array<const char*, 9> colors{"#ff7b54", "#ffa94d", "#ffd43b", "#a9e34b", "#51cf66",
+                                            "#3bc9db", "#4dabf7", "#748ffc", "#b197fc"};
 
     Svg svg(920, 520);
-    card(svg, "#ffffff", "#d0d7de", kInk, "Day length through the year, by latitude",
+    card(svg, kCard, kBorder, kInk, "Day length through the year, by latitude",
          std::format("Sunrise to sunset (upper limb, refracted), {}. Polar day counts 24 h, polar night 0 h.", kYear));
     const Frame f{70, 76, 700, 370, 1, static_cast<double>(days + 1), 0, 24};
     y_grid(svg, f, 0, 24, 3, " h");
@@ -336,7 +341,7 @@ void render_analemma(const std::filesystem::path& dir) {
     const int days = static_cast<int>(y.dates.size());
 
     Svg svg(560, 660);
-    card(svg, "#ffffff", "#d0d7de", kInk, "Analemma",
+    card(svg, kCard, kBorder, kInk, "Analemma",
          std::format("The Sun at 12:00 UTC every day of {}, seen from Greenwich.", kYear));
     const Frame f{78, 76, 440, 510, 170, 190, 10, 65};
     x_grid(svg, f, 170, 190, 5, "°");
@@ -376,7 +381,7 @@ void render_analemma(const std::filesystem::path& dir) {
 
 void render_sun_paths(const std::filesystem::path& dir) {
     Svg svg(920, 470);
-    card(svg, "#ffffff", "#d0d7de", kInk, "The Sun's path across the sky",
+    card(svg, kCard, kBorder, kInk, "The Sun's path across the sky",
          std::format("Paris, {}. Refracted altitude against azimuth; dots every hour (UTC).", kYear));
     const Frame f{70, 76, 820, 300, 30, 330, -2, 70};
     x_grid(svg, f, 30, 330, 30, "°");
@@ -384,7 +389,7 @@ void render_sun_paths(const std::filesystem::path& dir) {
     for (auto [az, name] : std::array<std::pair<double, const char*>, 3>{{{90, "East"}, {180, "South"}, {270, "West"}}})
         svg.add(R"(<text x="{:.1f}" y="{:.1f}" font-size="11" font-weight="600" fill="{}" text-anchor="middle">{}</text>)",
                 f.x(az), f.top - 6, kMuted, name);
-    svg.add(R"(<rect x="{:.1f}" y="{:.1f}" width="{:.1f}" height="{:.1f}" fill="#eef1f4"/>)", f.left, f.y(0),
+    svg.add(R"(<rect x="{:.1f}" y="{:.1f}" width="{:.1f}" height="{:.1f}" fill="#161b22"/>)", f.left, f.y(0),
             f.width, f.y(-2) - f.y(0));
 
     struct Path {
@@ -392,9 +397,9 @@ void render_sun_paths(const std::filesystem::path& dir) {
         const char* color;
         const char* name;
     };
-    const std::array<Path, 3> paths{{{6, 21, "#e0822f", "June solstice"},
-                                     {3, 20, "#3f9b6e", "March equinox"},
-                                     {12, 21, "#3070b8", "December solstice"}}};
+    const std::array<Path, 3> paths{{{6, 21, "#ffa94d", "June solstice"},
+                                     {3, 20, "#51cf66", "March equinox"},
+                                     {12, 21, "#4dabf7", "December solstice"}}};
     for (std::size_t k = 0; k < paths.size(); ++k) {
         const auto& p = paths[k];
         const auto midnight = spp::Time::from_utc(kYear, p.month, p.day);
@@ -408,7 +413,7 @@ void render_sun_paths(const std::filesystem::path& dir) {
         for (int hour = 0; hour < 24; ++hour) {
             const auto h = sun_sky(midnight.shifted(hour / 24.0), kParis);
             if (h.alt_deg < 0.0) continue;
-            svg.add(R"(<circle cx="{:.1f}" cy="{:.1f}" r="3.4" fill="#ffffff" stroke="{}" stroke-width="1.8"/>)",
+            svg.add(R"(<circle cx="{:.1f}" cy="{:.1f}" r="3.4" fill="#0d1117" stroke="{}" stroke-width="1.8"/>)",
                     f.x(h.az_deg), f.y(h.alt_deg), p.color);
             if (k == 0)
                 svg.add(R"(<text x="{:.1f}" y="{:.1f}" font-size="10" fill="{}" text-anchor="middle">{}h</text>)",
@@ -532,13 +537,106 @@ void render_spirals(const std::filesystem::path& dir) {
     }
 
     Svg svg(920, 640);
-    card(svg, "#0d1117", "#30363d", "#e6edf3", "Sunrise and sunset azimuth through the year",
+    card(svg, kCard, kBorder, kInk, "Sunrise and sunset azimuth through the year",
          std::format("Paris, {}. Angle = azimuth of the Sun at the event (N in red), height = day of the year "
                      "(1 January at the bottom), as in spp_spiral.",
                      kYear));
     spiral_panel(svg, Camera(240, 360, 132), rise, days, y, "Sunrise");
     spiral_panel(svg, Camera(680, 360, 132), set, days, y, "Sunset");
     svg.save(dir / "spirals.svg");
+}
+
+// ---------------------------------------------------------------------------
+// 6. Banner: the Sun's paths over Paris under a twilight sky
+// ---------------------------------------------------------------------------
+
+void render_banner(const std::filesystem::path& dir) {
+    constexpr int W = 1280, H = 400;
+    constexpr double horizon = 318.0;
+    Svg svg(W, H);
+
+    svg.add(R"svg(<defs>
+<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#060914"/><stop offset="0.55" stop-color="#101a38"/>
+  <stop offset="0.82" stop-color="#2a2350"/><stop offset="1" stop-color="#6b3a4f"/>
+</linearGradient>
+<linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#0b0d18"/><stop offset="1" stop-color="#05060b"/>
+</linearGradient>
+<radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+  <stop offset="0" stop-color="#ffe7a3" stop-opacity="0.95"/><stop offset="0.25" stop-color="#ffb347" stop-opacity="0.45"/>
+  <stop offset="1" stop-color="#ff8c42" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="dawn" cx="0.72" cy="1" r="0.6">
+  <stop offset="0" stop-color="#ff9a5a" stop-opacity="0.35"/><stop offset="1" stop-color="#ff9a5a" stop-opacity="0"/>
+</radialGradient>
+<linearGradient id="haze" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#ff9a5a" stop-opacity="0"/><stop offset="1" stop-color="#ff9a5a" stop-opacity="0.28"/>
+</linearGradient>
+<clipPath id="card"><rect width="{0}" height="{1}" rx="18"/></clipPath>
+</defs>
+<g clip-path="url(#card)">
+<rect width="{0}" height="{1}" fill="url(#sky)"/>
+<rect width="{0}" height="{1}" fill="url(#dawn)"/>)svg",
+            W, H);
+
+    // Stars: a fixed pseudo-random field, fainter toward the horizon.
+    std::uint32_t seed = 20260621u;
+    auto rnd = [&seed] {
+        seed = seed * 1664525u + 1013904223u;
+        return static_cast<double>(seed >> 8) / static_cast<double>(1u << 24);
+    };
+    for (int i = 0; i < 170; ++i) {
+        const double x = rnd() * W, y = rnd() * (horizon - 40.0), r = 0.4 + 1.1 * rnd() * rnd();
+        const double o = (0.25 + 0.75 * rnd()) * (1.0 - y / horizon);
+        svg.add(R"(<circle cx="{:.1f}" cy="{:.1f}" r="{:.2f}" fill="#ffffff" opacity="{:.2f}"/>)", x, y, r, o);
+    }
+
+    // The Sun's paths over Paris: azimuth 45°..315° across the right part,
+    // altitude 0°..70° above the horizon line.
+    const Frame f{430, 40, 820, horizon - 40, 45, 315, 0, 70};
+    struct Path {
+        int month, day;
+        const char* color;
+    };
+    const std::array<Path, 3> paths{{{12, 21, "#6ea8ff"}, {3, 20, "#f7c873"}, {6, 21, "#ff9f5a"}}};
+    for (const auto& p : paths) {
+        const auto midnight = spp::Time::from_utc(kYear, p.month, p.day);
+        Points pts;
+        for (int m = 0; m <= 24 * 60; m += 3) {
+            const auto h = sun_sky(midnight.shifted(m / 1440.0), kParis);
+            if (h.alt_deg > -1.0 && h.az_deg > 40.0 && h.az_deg < 320.0) pts.push_back({h.az_deg, h.alt_deg});
+        }
+        svg.add(R"(<polyline points="{}" fill="none" stroke="{}" stroke-width="12" stroke-opacity="0.13" stroke-linecap="round" stroke-linejoin="round"/>)",
+                polyline(pts, f), p.color);
+        svg.add(R"(<polyline points="{}" fill="none" stroke="{}" stroke-width="2.4" stroke-opacity="0.95" stroke-linecap="round" stroke-linejoin="round"/>)",
+                polyline(pts, f), p.color);
+    }
+    // The Sun itself, on the June path in the late afternoon.
+    const auto sun = sun_sky(spp::Time::from_utc(kYear, 6, 21, 16, 30), kParis);
+    const double sx = f.x(sun.az_deg), sy = f.y(sun.alt_deg);
+    svg.add(R"svg(<circle cx="{:.1f}" cy="{:.1f}" r="70" fill="url(#glow)"/>)svg", sx, sy);
+    svg.add(R"(<circle cx="{:.1f}" cy="{:.1f}" r="11" fill="#fff4d1"/>)", sx, sy);
+
+    // Horizon haze, horizon and ground.
+    svg.add(R"svg(<rect x="0" y="{:.1f}" width="{}" height="70" fill="url(#haze)"/>)svg", horizon - 70, W);
+    svg.add(R"svg(<rect x="0" y="{:.1f}" width="{}" height="{:.1f}" fill="url(#ground)"/>)svg", horizon, W, H - horizon);
+    svg.add(R"(<line x1="0" y1="{0:.1f}" x2="{1}" y2="{0:.1f}" stroke="#ffb07a" stroke-opacity="0.55" stroke-width="1.2"/>)",
+            horizon, W);
+    for (auto [az, label] : std::array<std::pair<double, const char*>, 3>{{{90, "E"}, {180, "S"}, {270, "W"}}})
+        svg.add(R"(<text x="{:.1f}" y="{:.1f}" font-size="13" font-weight="600" fill="#8b949e" text-anchor="middle" letter-spacing="2">{}</text>)",
+                f.x(az), horizon + 24, label);
+
+    // Title block.
+    svg.add(R"(<text x="64" y="146" font-size="96" font-weight="700" fill="#ffffff" letter-spacing="-2">Spp</text>)");
+    svg.add(R"(<text x="70" y="206" font-size="26" font-weight="300" fill="#c9d1d9" letter-spacing="1">Seasonal++</text>)");
+    svg.add(R"(<text x="68" y="254" font-size="21" fill="#e6edf3">High-precision solar astronomy in C++20</text>)");
+    svg.add(R"(<text x="68" y="284" font-size="14.5" fill="#8b949e">VSOP87D · IAU 1980 nutation · WGS84 parallax · events to 1 µs</text>)");
+    svg.add(R"(<text x="{}" y="{}" font-size="12" fill="#6e7681" text-anchor="end">The Sun's paths over Paris at the solstices and the equinox, computed by Spp</text>)",
+            W - 28, H - 22);
+    svg.add("</g>");
+    svg.add(R"(<rect x="0.5" y="0.5" width="{}" height="{}" rx="18" fill="none" stroke="#30363d"/>)", W - 1, H - 1);
+    svg.save(dir / "banner.svg");
 }
 
 }  // namespace
@@ -551,5 +649,6 @@ int main(int argc, char** argv) {
     render_analemma(dir);
     render_sun_paths(dir);
     render_spirals(dir);
+    render_banner(dir);
     return 0;
 }

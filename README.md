@@ -1,15 +1,20 @@
-# Spp (Seasonal++)
+<p align="center">
+  <img src="docs/images/banner.svg" alt="Spp (Seasonal++): high-precision solar astronomy in C++20" width="100%">
+</p>
 
-[![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white)](#building)
-[![CMake](https://img.shields.io/badge/CMake-3.28%2B-064F8C?logo=cmake&logoColor=white)](#building)
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20MSYS2%20UCRT64-0078D6)](#requirements)
-[![Ephemeris](https://img.shields.io/badge/ephemeris-VSOP87D%20%C2%B7%202%2C425%20terms-E07B39)](#3-heliocentric-earth-vsop87d)
-[![Dependencies](https://img.shields.io/badge/dependencies-none-2EA043)](#features)
-[![Floating point](https://img.shields.io/badge/fp64-strict%20IEEE%20754-6E40C9)](#floating-point-policy)
-[![Viewer](https://img.shields.io/badge/viewer-OpenGL%203.3-5586A4?logo=opengl&logoColor=white)](#azimuth-spirals)
+<p align="center">
+  <a href="#building"><img src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=cplusplus&logoColor=white" alt="C++20"></a>
+  <a href="#building"><img src="https://img.shields.io/badge/CMake-3.28%2B-064F8C?style=flat-square&logo=cmake&logoColor=white" alt="CMake 3.28+"></a>
+  <a href="#3-heliocentric-earth-vsop87d"><img src="https://img.shields.io/badge/ephemeris-VSOP87D-E07B39?style=flat-square" alt="VSOP87D ephemeris"></a>
+  <a href="#floating-point-policy"><img src="https://img.shields.io/badge/fp64-strict%20IEEE%20754-6E40C9?style=flat-square" alt="Strict IEEE 754 fp64"></a>
+  <a href="#features"><img src="https://img.shields.io/badge/dependencies-none-2EA043?style=flat-square" alt="No dependencies"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square" alt="License: GPL-3.0-or-later"></a>
+</p>
 
-![Daylight and twilight through the year in Paris, computed with Spp](docs/images/daylight.svg)
+<p align="center">
+  <b>Where the Sun is, and when it rises, transits and sets: anywhere, from 1000 BC to 3000 AD.</b><br>
+  Full VSOP87D ephemeris · strict IEEE 754 fp64 · ~0.4 µs per sky position · events solved to 1 µs
+</p>
 
 Spp is a C++20 library for high-precision solar positional astronomy. It
 computes where the Sun is and when it rises, transits and sets: apparent
@@ -78,6 +83,14 @@ duration  16.1715 h
 
 Every figure in this README is computed by the library and drawn by
 `spp_figures` (see [Accuracy tools](#accuracy-tools)).
+
+**Daylight and twilight through the year in Paris.** Every boundary is an event
+solved by `spp::events`: sunrise and sunset, then civil (−6°), nautical (−12°)
+and astronomical (−18°) twilight. Around the June solstice astronomical
+twilight lasts all night, because at 48.86° N the Sun never gets 18° below the
+horizon.
+
+![Daylight and twilight through the year in Paris, computed with Spp](docs/images/daylight.svg)
 
 **Day length through the year, from the equator to 80° N.** The curves meet
 just above 12 h, a few days before the March equinox and after the September
