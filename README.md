@@ -10,6 +10,7 @@
   <a href="#floating-point-policy"><img src="https://img.shields.io/badge/fp64-strict%20IEEE%20754-6E40C9?style=flat-square" alt="Strict IEEE 754 fp64"></a>
   <a href="#features"><img src="https://img.shields.io/badge/dependencies-none-2EA043?style=flat-square" alt="No dependencies"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square" alt="License: GPL-3.0-or-later"></a>
+  <a href="http://gitea.nas/nouni/Seasonal--/wiki"><img src="https://img.shields.io/badge/docs-wiki-0E8A16?style=flat-square" alt="Wiki"></a>
 </p>
 
 <p align="center">
@@ -33,6 +34,12 @@ It is built for large batch workloads, such as every day of a year across a
 grid of latitudes. It never trades accuracy for speed: every shortcut is
 measured against an extended-precision evaluation of the same theory and must
 match it to within double-precision rounding.
+
+**Wiki.** The [project wiki](http://gitea.nas/nouni/Seasonal--/wiki) has this
+documentation split into pages, the
+[known issues](http://gitea.nas/nouni/Seasonal--/wiki/Known-Issues) of the
+current release with workarounds, and the
+[roadmap](http://gitea.nas/nouni/Seasonal--/wiki/Roadmap).
 
 ```
 $ spp day 2026-06-21 48.8566 2.3522 35
@@ -1731,6 +1738,9 @@ Seasonal++/
   altitude −(semidiameter + dip).
 - **Compilers.** Developed and tested with GCC 15 only. The Clang and MSVC
   flags in `cmake/SppFlags.cmake` are untested.
+
+Known defects of the current release, with workarounds, are listed on the
+wiki's [Known issues](http://gitea.nas/nouni/Seasonal--/wiki/Known-Issues) page.
 
 ---
 
