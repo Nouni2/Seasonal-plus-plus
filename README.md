@@ -41,6 +41,10 @@ documentation split into pages, the
 current release with workarounds, and the
 [roadmap](http://gitea.nas/nouni/Seasonal-plus-plus/wiki/Roadmap).
 
+**Constitution.** The principles every change to Spp must respect (precision
+first, correct definitions, honest claims and the rest) are in
+[CONSTITUTION.md](CONSTITUTION.md).
+
 ```
 $ spp day 2026-06-21 48.8566 2.3522 35
 type      NORMAL
@@ -1674,7 +1678,7 @@ cmake --preset release -DSPP_BUILD_FIGURES=ON && cmake --build --preset release 
 ```
 Seasonal++/
 ├── CMakeLists.txt, CMakePresets.json
-├── README.md, LICENSE
+├── README.md, CONSTITUTION.md, LICENSE
 ├── .editorconfig, .gitattributes, .gitignore
 ├── cmake/
 │   ├── SppFlags.cmake            compiler flags and floating-point policy
