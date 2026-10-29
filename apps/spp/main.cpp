@@ -9,10 +9,12 @@
 // Longitude is positive East; elevation in metres.
 
 #include <charconv>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <optional>
 #include <print>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -41,8 +43,8 @@ struct Options {
 double num(std::string_view s) {
     double v{};
     auto [p, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
-    if (ec != std::errc{} || p != s.data() + s.size()) {
-        std::println(stderr, "spp: not a number: '{}'", s);
+    if (ec != std::errc{} || p != s.data() + s.size() || !std::isfinite(v)) {
+        std::println(stderr, "spp: not a finite number: '{}'", s);
         std::exit(2);
     }
     return v;
@@ -156,8 +158,8 @@ int cmd_year(const std::vector<std::string_view>& a, const Options& o) {
             const spp::CivilDate date{year, m, dd};
             if (year == 1582 && m == 10 && dd > 4 && dd < 15) continue;   // dropped by the reform
             const auto d = spp::events::day(date, obs, o.atm, o.dut1);
-            std::println("{:04d}-{:02d}-{:02d},{},{},{},{},{:.6f}", year, m, dd, type_name(d.type),
-                         when(d.transit), when(d.rise), when(d.set), d.duration_hours);
+            std::println("{},{},{},{},{},{:.6f}", spp::iso_date(date), type_name(d.type), when(d.transit),
+                         when(d.rise), when(d.set), d.duration_hours);
         }
     }
     return 0;
@@ -186,6 +188,9 @@ int main(int argc, char** argv) {
         if (cmd == "year") return cmd_year(args, o);
     } catch (const std::system_error&) {
         return 1;   // output closed early, e.g. piped into `head`
+    } catch (const std::invalid_argument& e) {
+        std::println(stderr, "spp: {}", e.what());
+        return 2;
     }
     usage();
 }

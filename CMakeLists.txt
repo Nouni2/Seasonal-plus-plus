@@ -30,8 +30,37 @@ include(cmake/SppFlags.cmake)
 # ------------------------------------------------------------------------------
 # VSOP87D tables: data/VSOP87D.ear is compiled into the library at build time
 # ------------------------------------------------------------------------------
-add_executable(vsop_gen tools/vsop_gen.cpp)
-spp_apply_flags(vsop_gen)
+# vsop_gen runs on the build machine. Natively, and when cross-compiling with
+# CMAKE_CROSSCOMPILING_EMULATOR (which CMake prepends to the command), it is
+# built with the project's compiler. When cross-compiling without an emulator,
+# it is either given (SPP_VSOP_GEN_EXECUTABLE) or built with a host compiler
+# that accepts GCC/Clang options (SPP_HOST_CXX). Its output does not depend on
+# the compiler: decimals are converted with correctly rounded std::from_chars.
+set(SPP_VSOP_GEN_EXECUTABLE "" CACHE FILEPATH "Prebuilt host vsop_gen, for cross-compiling without an emulator")
+set(SPP_HOST_CXX "c++" CACHE STRING "Host C++20 compiler that builds vsop_gen when cross-compiling without an emulator")
+
+if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+    if(SPP_VSOP_GEN_EXECUTABLE)
+        set(SPP_VSOP_GEN ${SPP_VSOP_GEN_EXECUTABLE})
+        set(SPP_VSOP_GEN_DEPENDS ${SPP_VSOP_GEN_EXECUTABLE})
+    else()
+        set(SPP_VSOP_GEN ${PROJECT_BINARY_DIR}/host/vsop_gen${CMAKE_HOST_EXECUTABLE_SUFFIX})
+        set(SPP_VSOP_GEN_DEPENDS ${SPP_VSOP_GEN})
+        add_custom_command(
+            OUTPUT ${SPP_VSOP_GEN}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_BINARY_DIR}/host
+            COMMAND ${SPP_HOST_CXX} -std=c++20 -O2 ${PROJECT_SOURCE_DIR}/tools/vsop_gen.cpp -o ${SPP_VSOP_GEN}
+            DEPENDS ${PROJECT_SOURCE_DIR}/tools/vsop_gen.cpp
+            COMMENT "Building vsop_gen for the host with ${SPP_HOST_CXX}"
+            VERBATIM
+        )
+    endif()
+else()
+    add_executable(vsop_gen tools/vsop_gen.cpp)
+    spp_apply_flags(vsop_gen)
+    set(SPP_VSOP_GEN vsop_gen)
+    set(SPP_VSOP_GEN_DEPENDS vsop_gen)
+endif()
 
 set(SPP_GENERATED_DIR ${PROJECT_BINARY_DIR}/generated)
 set(SPP_VSOP_INC ${SPP_GENERATED_DIR}/spp/vsop87d_earth_terms.inc)
@@ -39,8 +68,8 @@ set(SPP_VSOP_INC ${SPP_GENERATED_DIR}/spp/vsop87d_earth_terms.inc)
 add_custom_command(
     OUTPUT ${SPP_VSOP_INC}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${SPP_GENERATED_DIR}/spp
-    COMMAND vsop_gen ${PROJECT_SOURCE_DIR}/data/VSOP87D.ear ${SPP_VSOP_INC}
-    DEPENDS vsop_gen ${PROJECT_SOURCE_DIR}/data/VSOP87D.ear
+    COMMAND ${SPP_VSOP_GEN} ${PROJECT_SOURCE_DIR}/data/VSOP87D.ear ${SPP_VSOP_INC}
+    DEPENDS ${SPP_VSOP_GEN_DEPENDS} ${PROJECT_SOURCE_DIR}/data/VSOP87D.ear
     COMMENT "Generating VSOP87D Earth tables"
     VERBATIM
 )
@@ -54,6 +83,7 @@ add_library(spp STATIC
     src/earth.cpp
     src/earth_state.cpp
     src/events.cpp
+    src/observe.cpp
     src/sky.cpp
     src/sun.cpp
     src/model/espenak_meeus.cpp
@@ -81,15 +111,32 @@ spp_apply_flags(spp)
 # ------------------------------------------------------------------------------
 # Executables
 # ------------------------------------------------------------------------------
-# The library is C++20; executables use C++23 for std::print, which needs
-# libstdc++exp with GCC.
+# The library is C++20; executables use C++23 for std::print. Some standard
+# libraries keep part of std::print in a separate library (libstdc++exp for
+# libstdc++, on some platforms and versions), whatever the compiler. Test-link
+# a std::print program, and add libstdc++exp only if it is what makes it link.
+include(CheckCXXSourceCompiles)
+set(SPP_PRINT_TEST "#include <print>\nint main() { std::print(\"{}\", 1); }")
+set(SPP_LIBRARY_CXX_STANDARD ${CMAKE_CXX_STANDARD})
+set(CMAKE_CXX_STANDARD 23)   # the checks compile with the executables' standard
+check_cxx_source_compiles("${SPP_PRINT_TEST}" SPP_PRINT_LINKS)
+set(SPP_PRINT_LIBRARIES "")
+if(NOT SPP_PRINT_LINKS)
+    set(CMAKE_REQUIRED_LIBRARIES stdc++exp)
+    check_cxx_source_compiles("${SPP_PRINT_TEST}" SPP_PRINT_LINKS_WITH_STDCXXEXP)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    if(SPP_PRINT_LINKS_WITH_STDCXXEXP)
+        set(SPP_PRINT_LIBRARIES stdc++exp)
+    else()
+        message(WARNING "std::print does not link with this standard library; the executables will not build")
+    endif()
+endif()
+set(CMAKE_CXX_STANDARD ${SPP_LIBRARY_CXX_STANDARD})
+
 function(spp_add_executable target)
     add_executable(${target} ${ARGN})
     set_target_properties(${target} PROPERTIES CXX_STANDARD 23)
-    target_link_libraries(${target} PRIVATE spp::spp)
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        target_link_libraries(${target} PRIVATE stdc++exp)
-    endif()
+    target_link_libraries(${target} PRIVATE spp::spp ${SPP_PRINT_LIBRARIES})
     spp_apply_flags(${target})
 endfunction()
 
@@ -115,6 +162,19 @@ if(SPP_BUILD_VALIDATION)
     # Uses internal headers (src/) and the generated tables.
     spp_add_executable(spp_cache_check tools/cache_check.cpp)
     target_include_directories(spp_cache_check PRIVATE ${PROJECT_SOURCE_DIR}/src ${SPP_GENERATED_DIR})
+
+    # The whole pipeline against an extended-precision evaluation of the same models.
+    spp_add_executable(spp_pipeline_check tools/pipeline_check.cpp)
+    target_include_directories(spp_pipeline_check PRIVATE ${PROJECT_SOURCE_DIR}/src ${SPP_GENERATED_DIR})
+
+    # events::day against a dense sampling of its own condition, 60°-90°.
+    spp_add_executable(spp_day_scan tools/day_scan.cpp)
+
+    # The figures the README quotes about events, sidereal time and time scales.
+    spp_add_executable(spp_readme_numbers tools/readme_numbers.cpp)
+
+    # Library side of tools/reference_check.py.
+    spp_add_executable(spp_dump tools/spp_dump.cpp)
 endif()
 
 if(SPP_BUILD_BENCH)

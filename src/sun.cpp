@@ -2,13 +2,16 @@
 
 #include <cmath>
 
+#include "core/split.hpp"
 #include "earth_state.hpp"
+#include "observe.hpp"
 #include "spp/core/angles.hpp"
 #include "spp/sky.hpp"
 
 namespace spp::sun {
 
 Ecliptic geometric(Instant<TT> t) {
+    t = detail::normalized(t);
     // The geocentric Sun is the heliocentric Earth (VSOP87D) reflected through
     // the origin: λ = L + 180°, β = -B, same distance.
     const auto e = detail::earth_state(t);
@@ -38,12 +41,12 @@ Equatorial apparent(Instant<TT> t, const earth::Nutation& n) {
 
 Equatorial apparent(Instant<TT> t) { return apparent(t, earth::nutation(t)); }
 
-double semidiameter_deg(Instant<TT> t) { return sun_radius_arcsec / detail::earth_state(t).r_au / 3600.0; }
+double semidiameter_deg(Instant<TT> t) {
+    return sun_radius_arcsec / detail::earth_state(detail::normalized(t)).r_au / 3600.0;
+}
 
 Horizontal horizontal(const Time& t, const Observer& obs, const Atmosphere& atm) {
-    const auto tt = t.tt();
-    const auto n = earth::nutation(tt);
-    return sky::observe(apparent(tt, n), obs, earth::lst_deg(t.ut1(), n, obs.lon_deg), atm);
+    return detail::observed(detail::geocentric(t), obs, atm);
 }
 
 }  // namespace spp::sun

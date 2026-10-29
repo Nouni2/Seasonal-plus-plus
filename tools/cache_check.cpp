@@ -92,6 +92,51 @@ struct Stat {
     }
 };
 
+// The design choices of the cache, measured: the same Chebyshev fit as
+// src/earth_state.cpp, rebuilt with a different segment length or without the
+// offset, evaluated in double, against the extended-precision series.
+struct Variant {
+    const char* name;
+    std::int64_t segment_days;
+    bool offset;
+    ld max_err[3] = {0, 0, 0};   // L, B (rad), R (AU)
+};
+
+void evaluate_variant(Variant& v, std::int64_t days, double frac, const Truth& x) {
+    constexpr int kDegree = 24, kNodes = kDegree + 1;
+    const std::int64_t index = (days >= 0 ? days : days - v.segment_days + 1) / v.segment_days;
+    const double start = double(index * v.segment_days), half = 0.5 * double(v.segment_days);
+    double f[3][kNodes];
+    for (int k = 0; k < kNodes; ++k) {
+        const double xk = std::cos(double(kPi) * (k + 0.5) / kNodes);
+        const auto e = spp::detail::earth_state_direct((start + half * (xk + 1.0)) / 36525.0);
+        f[0][k] = e.l_rad;
+        f[1][k] = e.b_rad;
+        f[2][k] = e.r_au;
+    }
+    const double local = double(days - index * v.segment_days) + frac;
+    const double xx = local * (2.0 / double(v.segment_days)) - 1.0;
+    const ld truth_q[3] = {x.l, x.b, x.r};
+    for (int q = 0; q < 3; ++q) {
+        const double off = v.offset ? f[q][kNodes / 2] : 0.0;
+        double c[kNodes];
+        for (int j = 0; j < kNodes; ++j) {
+            double sum = 0.0;
+            for (int k = 0; k < kNodes; ++k) sum += (f[q][k] - off) * std::cos(double(kPi) * j * (k + 0.5) / kNodes);
+            c[j] = (2.0 / kNodes) * sum;
+        }
+        c[0] *= 0.5;
+        double b1 = 0.0, b2 = 0.0;
+        for (int j = kDegree; j >= 1; --j) {
+            const double b0 = 2.0 * xx * b1 - b2 + c[j];
+            b2 = b1;
+            b1 = b0;
+        }
+        const double value = off + (xx * b1 - b2 + c[0]);
+        v.max_err[q] = std::max(v.max_err[q], fabsl(ld(value) - truth_q[q]));
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -144,6 +189,26 @@ int main() {
         std::println("{:<6}{:>13.3e} {:<4}{:>13.3e} {:<4}{:>10.1f} %{}", s.name, s.direct * s.scale, s.unit,
                      s.cached * s.scale, s.unit, 100.0 * double(s.worse) / double(n), ok ? "" : "   FAIL");
     }
+
+    // Design choices, for the README: the library's fit, the fit without the
+    // offset, and 32-day segments, at 2,000 random instants.
+    Variant variants[] = {{"16 d, offset (library)", 16, true}, {"16 d, no offset", 16, false},
+                          {"32 d, offset", 32, true}};
+    std::mt19937_64 rng2(77);
+    for (int i = 0; i < 2000; ++i) {
+        const std::int64_t days = day_dist(rng2);
+        const double frac = frac_dist(rng2);
+        const Truth x = truth(days, frac);
+        for (Variant& v : variants) evaluate_variant(v, days, frac, x);
+    }
+    std::println("\nfit variants, 2000 random instants; max error vs extended-precision evaluation");
+    std::println("{:<26}{:>14}{:>14}{:>14}", "", "L", "B", "R");
+    for (const Variant& v : variants)
+        std::println("{:<26}{:>12.3e} \"{:>12.3e} \"{:>11.3e} AU", v.name, double(v.max_err[0]) * arcsec_per_rad,
+                     double(v.max_err[1]) * arcsec_per_rad, double(v.max_err[2]));
+    std::println("no offset: L error x{:.2f} ({:.1f} bits)", double(variants[1].max_err[0] / variants[0].max_err[0]),
+                 std::log2(double(variants[1].max_err[0] / variants[0].max_err[0])));
+
     std::println("{}", pass ? "PASS" : "FAIL");
     return pass ? 0 : 1;
 }

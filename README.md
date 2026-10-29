@@ -15,7 +15,7 @@
 
 <p align="center">
   <b>Where the Sun is, and when it rises, transits and sets: anywhere, from 1000 BC to 3000 AD.</b><br>
-  Full VSOP87D ephemeris · strict IEEE 754 fp64 · ~0.4 µs per sky position · events solved to 1 µs
+  Full VSOP87D ephemeris · strict IEEE 754 fp64 · ~0.5 µs per sky position (warm cache) · events solved to 1 µs
 </p>
 
 Spp is a C++20 library for high-precision solar positional astronomy. It
@@ -49,9 +49,9 @@ first, correct definitions, honest claims and the rest) are in
 $ spp day 2026-06-21 48.8566 2.3522 35
 type      NORMAL
 transit   2026-06-21T11:52:24Z
-sunrise   2026-06-21T03:46:32Z
-sunset    2026-06-21T19:58:17Z
-duration  16.1959 h
+sunrise   2026-06-21T03:46:57Z
+sunset    2026-06-21T19:57:52Z
+duration  16.1820 h
 ```
 
 ---
@@ -107,7 +107,7 @@ horizon.
 **Day length through the year, from the equator to 80° N.** The curves meet
 just above 12 h, a few days before the March equinox and after the September
 one: refraction and the Sun's radius make the day at the equinox slightly
-longer than 12 h (12.12 h at the equator, 12.17 h in Paris on 20 March).
+longer than 12 h (12.11 h at the equator, 12.16 h in Paris on 20 March).
 Above the Arctic Circle the curves reach the polar day (24 h) and polar night
 (0 h) plateaus.
 
@@ -115,7 +115,7 @@ Above the Arctic Circle the curves reach the polar day (24 h) and polar night
 
 **The Sun's path across the sky over Paris** at the June solstice, the March
 equinox and the December solstice. On these dates solar noon falls a few
-minutes before 12:00 UTC (11:52, 11:58 and 11:49): Paris lies 2.35° east of
+minutes before 12:00 UTC (11:52, 11:58 and 11:49, to the nearest minute): Paris lies 2.35° east of
 Greenwich, 9 minutes of time, and the equation of time adds or removes a few
 more.
 
@@ -130,8 +130,8 @@ Earth's orbit and the tilt of its axis.
 
 **Where the Sun rises and sets.** The azimuth of sunrise and sunset over the
 year as spirals, the same view as the interactive `spp_spiral` viewer. In
-Paris, sunrise swings between 51.5° (northeast, June) and 125.9° (southeast,
-December), and sunset between 234.1° and 308.5°.
+Paris, sunrise swings between 51.6° (northeast, June) and 126.0° (southeast,
+December), and sunset between 234.0° and 308.4°.
 
 ![Sunrise and sunset azimuth spirals](docs/images/spirals.svg)
 
@@ -155,8 +155,10 @@ December), and sunset between 234.1° and 308.5°.
 - **Events.** Meridian transit, sunrise and sunset (upper limb), civil, nautical
   and astronomical twilight, or any target altitude. Days are classified as
   normal, polar day or polar night.
-- **Speed.** About 0.4 µs for a refracted topocentric altitude and about 7 µs for
-  a complete sunrise/transit/sunset day, on one core.
+- **Speed.** About 0.5 µs for a refracted topocentric altitude and about 8 µs for
+  a complete sunrise/transit/sunset day, on one core, when consecutive queries
+  stay within cached 16-day segments. A query in a new segment first fills it,
+  about 0.9 ms ([Performance](#performance)).
 - **Portable standard C++.** The library has no dependencies beyond the
   standard library. Only the optional `spp_spiral` viewer uses OpenGL.
 
@@ -167,7 +169,10 @@ December), and sunset between 234.1° and 308.5°.
 ### Requirements
 
 - A C++20 compiler; the executables use C++23 for `std::print`. Developed with
-  GCC 15.2 (MSYS2 UCRT64 on Windows).
+  GCC 15.2 (MSYS2 UCRT64 on Windows); also built and checked with GCC 14.2 and
+  Clang 18 (with libstdc++) on Linux x86-64. Where the standard library keeps
+  part of `std::print` in `libstdc++exp`, the configure step detects it with
+  a test link and links it, whatever the compiler.
 - CMake ≥ 3.28 and Ninja.
 - Optional, for `spp_spiral`: GLFW 3, GLEW, GLM and OpenGL 3.3. The target is
   built automatically when they are found, and skipped otherwise.
@@ -185,13 +190,26 @@ cmake --build --preset release
 | `release` | `build/release/` | Optimized |
 | `debug` | `build/debug/` | Debug information, no optimization |
 
+**Cross-compiling.** `vsop_gen`, which generates the VSOP87D tables, runs on
+the build machine. With `CMAKE_CROSSCOMPILING_EMULATOR` set (for example
+`qemu-aarch64`), it is built for the target and run through the emulator.
+Without an emulator, it is built for the host with `SPP_HOST_CXX` (default
+`c++`, any compiler taking GCC/Clang options), or taken from
+`SPP_VSOP_GEN_EXECUTABLE`. Both paths were checked with an aarch64 Linux
+cross toolchain (GCC 14.2): the generated tables are byte-identical to a
+native build.
+
+```sh
+cmake -S . -B build-arm --toolchain aarch64.cmake -DSPP_HOST_CXX=g++
+```
+
 CMake options:
 
 | Option | Default | Effect |
 |---|---|---|
 | `SPP_NATIVE` | `OFF` | Adds `-march=native` |
 | `SPP_BUILD_APPS` | top level | Builds `spp` and, when GLFW/GLEW/GLM are found, `spp_spiral` |
-| `SPP_BUILD_VALIDATION` | top level | Builds the `spp_cache_check` accuracy tool |
+| `SPP_BUILD_VALIDATION` | top level | Builds the accuracy tools: `spp_cache_check`, `spp_pipeline_check`, `spp_day_scan`, `spp_readme_numbers` and `spp_dump` ([Accuracy tools](#accuracy-tools)) |
 | `SPP_BUILD_BENCH` | `OFF` | Builds the `spp_bench` benchmark |
 | `SPP_BUILD_FIGURES` | `OFF` | Builds `spp_figures`, which renders the README figures |
 | `SPP_INSTALL` | top level | Generates the install rules and the CMake package |
@@ -258,11 +276,31 @@ so `C:\msys64\ucrt64\bin` must be on `PATH` to run them.
 All targets are compiled with:
 
 - `-fno-fast-math`: strict IEEE 754 semantics.
-- `-ffp-contract=off`: no implicit fused multiply-add, so results do not depend
-  on the target CPU.
+- `-ffp-contract=off`: no implicit fused multiply-add, so the compiler
+  generates the same arithmetic whatever the target CPU.
 - `-fexcess-precision=standard`: no hidden extended-precision intermediates.
+  This matters only where floating point runs on the x87 unit (32-bit x86
+  without SSE2). On x86-64, which uses SSE2, the library compiles to identical
+  machine code with and without it (GCC 14.2, all 13 sources); it is kept for
+  x87 targets.
 
 All computation is in `double`.
+
+**What this does and does not guarantee.** The flags rule out
+compiler-introduced contraction and excess precision. They do not make results
+bit-identical everywhere: `sin`, `cos`, `atan2`, `pow` and the other
+transcendental functions come from the platform's C math library (glibc, the
+Windows UCRT, Apple libm), which is not correctly rounded, so the last bits
+can differ between platforms. On one platform they can also differ between
+CPUs: glibc on x86-64 selects FMA/AVX2 variants of these functions at run
+time. Measured on Linux x86-64 (glibc 2.39, GCC 14.2), turning those variants
+off (`GLIBC_TUNABLES=glibc.cpu.hwcaps=-AVX2,-FMA`) changes 320 of 20,000
+positions, by at most 5.7 × 10⁻¹⁴° (2 × 10⁻¹⁰″); each mode is deterministic
+from run to run. `tools/reference_check.py` measures this (section
+`libm_dispatch`). Between platforms, the same 20,000 positions computed on
+x86-64 (default glibc variants) and on aarch64 (GCC 14.2 cross-compiled,
+glibc 2.39, run under QEMU) were bit-identical. The differences are of the
+size of double rounding, far below every model error.
 
 ---
 
@@ -313,12 +351,12 @@ At the March equinox of 2026, λ passes through 0°:
 
 ```
 $ spp sun 2026-03-20 14:46 48.8566 2.3522 35
-time        2026-03-20T14:46:00Z  (ΔT 69.11 s, DUT1 +0.072 s estimated)
+time        2026-03-20T14:46:00Z  (ΔT 69.13 s, DUT1 +0.057 s estimated)
 ecliptic    λ 0.00004519°  β 0.00010129°  R 0.995917594 AU
 equatorial  α 0.00000117° (0.00000008 h)  δ 0.00011091°
 nutation    Δψ 6.2158"  Δε 9.1308"  ε 23.43841879°
-sidereal    GMST 39.64810164°  GAST 39.64968578°
-horizontal  alt 29.298435° (geometric 29.268563°)  az 230.094007°
+sidereal    GMST 39.64803842°  GAST 39.64962255°
+horizontal  alt 29.298467° (geometric 29.268595°)  az 230.093945°
 ```
 
 Without a location, only the geocentric lines are printed.
@@ -342,9 +380,9 @@ Events are reported in UTC. For Sydney, sunrise falls on the previous UTC date:
 $ spp day 2026-12-21 -33.8688 151.2093 58
 type      NORMAL
 transit   2026-12-21T01:53:01Z
-sunrise   2026-12-20T18:40:18Z
-sunset    2026-12-21T09:05:45Z
-duration  14.4240 h
+sunrise   2026-12-20T18:40:37Z
+sunset    2026-12-21T09:05:26Z
+duration  14.4138 h
 ```
 
 ### `spp year`
@@ -352,8 +390,8 @@ duration  14.4240 h
 ```
 $ spp year 2026 48.8566 2.3522
 date,type,transit_utc,sunrise_utc,sunset_utc,duration_h
-2026-01-01,NORMAL,2026-01-01T11:54:09Z,2026-01-01T07:43:33Z,2026-01-01T16:04:56Z,8.356327
-2026-01-02,NORMAL,2026-01-02T11:54:37Z,2026-01-02T07:43:30Z,2026-01-02T16:05:56Z,8.374047
+2026-01-01,NORMAL,2026-01-01T11:54:09Z,2026-01-01T07:43:58Z,2026-01-01T16:04:31Z,8.342458
+2026-01-02,NORMAL,2026-01-02T11:54:37Z,2026-01-02T07:43:55Z,2026-01-02T16:05:31Z,8.360203
 ...
 ```
 
@@ -451,8 +489,8 @@ int main() {
 
 ```
 RA 0.000000 h  Dec +0.000111 deg
-altitude +29.298435 deg  azimuth 230.094007 deg
-sunrise 2026-06-21T03:46:32Z  sunset 2026-06-21T19:58:17Z  16.1959 h
+altitude +29.298467 deg  azimuth 230.093945 deg
+sunrise 2026-06-21T03:46:57Z  sunset 2026-06-21T19:57:52Z  16.1820 h
 civil dusk 2026-06-21T20:40:32Z
 ```
 
@@ -468,9 +506,9 @@ produced a number is always explicit.
 | Symbol | Description |
 |---|---|
 | `Time` | An instant held in UTC, with its DUT1 |
-| `Time::from_utc(y, mo, d, h, mi, s [, dut1])` | From a civil UTC date and time; DUT1 is estimated when omitted ([§2.5](#25-time-scales)) |
+| `Time::from_utc(y, mo, d, h, mi, s [, dut1])` | From a civil UTC date and time; DUT1 is estimated when omitted ([§2.5](#25-time-scales)). Throws `std::invalid_argument` for a date that does not exist (`is_valid`) or a non-finite second or DUT1; hours, minutes and seconds outside their ranges carry over (24:00 is 0:00 of the next day) |
 | `Time::from_civil(CivilDateTime, dut1)` | Same, from a struct |
-| `Time::from_jd(day, frac, dut1)` | From a split Julian Date (normalized) |
+| `Time::from_jd(day, frac, dut1)` | From a split Julian Date (normalized). Throws `std::invalid_argument` for a non-finite `frac` or DUT1, or \|frac\| ≥ 2⁵² |
 | `t.utc()`, `t.ut1()`, `t.tt()` | The instant as `Instant<UTC/UT1/TT>` |
 | `t.delta_t()`, `t.dut1()` | ΔT = TT − UT1 and DUT1 = UT1 − UTC, seconds |
 | `t.tt_minus_utc()`, `t.dut1_estimated()` | TT − UTC in seconds; whether DUT1 was estimated rather than given |
@@ -478,9 +516,11 @@ produced a number is always explicit.
 | `t.decimal_year()` | The year value used to evaluate ΔT |
 | `t.shifted(days)` | Another instant, same DUT1 |
 | `t.to_civil()`, `t.iso_utc()` | Civil UTC date and time; ISO 8601 rounded to the second |
-| `Instant<Scale>` | `{day, frac}` split Julian Date; `days_since_j2000()`, `centuries_since_j2000()` |
+| `iso_date(CivilDate)` | `YYYY-MM-DD`; years outside 0…9999 in the ISO 8601 expanded form, with a sign and at least four digits (`-0100-03-01`) |
+| `Instant<Scale>` | `{day, frac}` split Julian Date; `days_since_j2000()`, `centuries_since_j2000()`. Any `frac` is accepted: functions that take an `Instant` normalize it first |
 | `CivilDate`, `CivilDateTime` | Calendar dates (Julian before 1582-10-15, Gregorian after) |
 | `is_gregorian(CivilDate)` | Whether a date is on or after 1582-10-15 |
+| `is_valid(CivilDate)` | Whether a date exists: month 1–12, day within the month (Julian leap years before 1582-10-15, Gregorian after), not 1582-10-05 to 1582-10-14 |
 | `Ecliptic` | `lon_deg`, `lat_deg`, `dist_au` |
 | `Equatorial` | `ra_deg`, `dec_deg`, `dist_au`, `ra_hours()` |
 | `Horizontal` | `alt_deg`, `az_deg` |
@@ -529,9 +569,11 @@ produced a number is always explicit.
 |---|---|
 | `altitude_deg(Time, Observer, Atmosphere)` | Full pipeline: apparent, topocentric, refracted altitude of the Sun's center |
 | `transit(approx, lon, cfg)` | Meridian transit near an approximate instant ([§13.3](#133-transit)) |
-| `crossing(transit, obs, atm, target_alt_deg, dir, cfg)` | Instant the Sun's center reaches a target altitude before or after transit; `nullopt` if it never does within 12 h ([§13.4](#134-crossings)) |
+| `crossing(transit, obs, atm, target_alt_deg, dir, cfg)` | Instant the Sun's center reaches a target altitude before or after transit; `nullopt` if it never does within 12 h ([§13.4](#134-crossings)). `transit` must be the transit for the observer's longitude (`transit()` or `Day::transit`); debug builds assert \|hour angle\| < 0.01° |
+| `upper_limb_altitude_deg(Time, Observer, Atmosphere)` | Apparent altitude of the upper limb: the topocentric center raised by the semidiameter, then refracted ([§13.1](#131-definitions)) |
+| `upper_limb_crossing(transit, obs, atm, target_alt_deg, dir, cfg)` | Instant the upper limb reaches a target apparent altitude; target 0 is sunrise or sunset ([§13.4](#134-crossings)) |
 | `day(date, obs [, atm, dut1, cfg])` | `Day{date, type, transit, rise, set, duration_hours}` ([§13.2](#132-one-day)) |
-| `upper_limb_deg` | −16′: the mean sunrise/sunset altitude (`day` uses the actual semidiameter) |
+| `upper_limb_deg` | −16′: the center's geometric altitude when the upper limb touches the geometric horizon (mean semidiameter), for use with refraction off |
 | `civil_twilight_deg`, `nautical_twilight_deg`, `astronomical_twilight_deg` | −6°, −12°, −18° |
 | `DayType` | `Normal`, `PolarDay`, `PolarNight` |
 | `Direction` | `Before` (rising side), `After` (setting side) |
@@ -550,10 +592,15 @@ produced a number is always explicit.
 
 ### Thread safety
 
-All functions are reentrant. The ephemeris cache (see
+All functions are thread-safe: they can be called from any number of threads
+at once. The ephemeris cache (see
 [Chebyshev earth state](#chebyshev-earth-state)) is `thread_local`, so threads
 never share or lock it. Each thread that computes positions holds 67 KB of
 cache.
+
+They are not reentrant in the strict sense: the cache is hidden mutable
+state, and its first use on a thread can allocate (where thread-local storage
+is emulated). Do not call Spp from a signal handler.
 
 ---
 
@@ -577,9 +624,9 @@ cache.
 - **UTC** is the input and output scale. **UT1** = UTC + DUT1 drives Earth
   rotation (sidereal time). **TT** drives the ephemeris; from 1972 it is exact,
   TT = UTC + 32.184 s + (TAI − UTC) from the leap-second table.
-- **DUT1** is estimated when not given (typically within a few hundredths of a
-  second from 1972 on; [§2.5](#25-time-scales)). Pass the IERS value for the
-  best hour angles.
+- **DUT1** is estimated when not given (within 7 ms of IERS from 1972 to
+  2026-09; [§2.5](#25-time-scales)). Pass the IERS value for the best hour
+  angles after the observed ΔT table.
 - **Calendar.** The Julian calendar is used before 1582-10-15 and the Gregorian
   from that date on. Years use astronomical numbering: 1 BC is year 0, 2 BC is
   year −1.
@@ -587,16 +634,16 @@ cache.
 ### Events
 
 - **Sunrise and sunset** are the instants the upper limb touches the horizon:
-  the apparent (refracted) altitude of the Sun's center equals minus its
-  semidiameter, 959.63″/R (15.73′–16.27′ over the year). See
+  the apparent (refracted) altitude of the upper limb, one semidiameter
+  (959.63″/R, 15.73′–16.27′ over the year) above the center, is 0. See
   [§13.1](#131-definitions) for how this relates to the usual −0.8333° almanac
   convention.
 - **Transit** is the instant the hour angle of the apparent Sun is zero.
 - **`events::day(date, …)`** searches around local solar noon of `date`, taken
   as 12:00 − longitude/15 h UTC. Rise and set are searched within 12 h either
   side of that transit, so they can fall on the neighbouring UTC date.
-- **Day type** is decided from the altitudes at transit and 12 h before and
-  after it. Next to polar day, a normal day can have a sunset but no sunrise
+- **Day type** is decided from the upper limb's apparent altitude at transit
+  and 12 h before and after it. Next to polar day, a normal day can have a sunset but no sunrise
   (or the reverse) ([§13.2](#132-one-day)).
 
 ---
@@ -714,7 +761,8 @@ other at exact multiples.
 
 `iso_utc()` rounds to the nearest second by adding 0.5 s to the JD fraction
 before converting, so a time such as 23:59:59.7 correctly rolls over to the
-next date.
+next date. Years outside 0…9999 are written in the ISO 8601 expanded form,
+with a sign and at least four digits: year −5 is `-0005`.
 
 #### 2.4 Epochs
 
@@ -743,18 +791,30 @@ computed from the split form as T = D / 36525, with D from
 |---|---|---|
 | Before 1972-01-01 | DUT1 + ΔT (model, §2.6) | 0: UTC is taken as UT1 |
 | 1972-01-01 to 2027-06-28 | 32.184 s + (TAI − UTC), exact | (TT − UTC) − ΔT, clamped to ±0.9 s |
-| After 2027-06-28 | DUT1 + ΔT (model) | The value on 2027-06-28, held |
+| After 2027-06-28 | DUT1 + ΔT (model) | Held at the end of the table: (TT − UTC on 2027-06-27) − ΔT at 2027-06-28 0h UTC, −0.0271 s |
 
 - **TAI − UTC** comes from the IERS leap-second table (28 steps, from 10 s on
   1972-01-01 to 37 s on 2017-01-01), which IERS Bulletin C 72 (July 2026)
   extends without change to 2027-06-28. `tai_minus_utc()` exposes it.
 - **Estimated DUT1** follows from ΔT = TT − UT1 and exact TT: it is only as good
-  as the ΔT table. It gives −0.176 s on 2020-01-01 (IERS: −0.177 s), +0.074 s on
-  2026-01-30 (Bulletin A: +0.071 s) and +0.324 s on 2000-01-01 (IERS: about
-  +0.355 s). The ±0.9 s clamp is the bound the leap-second system maintains.
-- **Continuity.** Holding the last DUT1 after the table keeps TT continuous at
-  2027-06-28. At 1972-01-01, TT − UTC steps from the model (42.249 s) to the
-  exact 42.184 s, a jump of 0.065 s (0.003″ in the Sun's position).
+  as the ΔT table. Over the observed table (1972-01 to 2026-09) it equals the
+  IERS EOP 20 C04 value on the 1st of every month and is within 6.7 ms of it on
+  every day (`tools/reference_check.py`). It gives +0.3555 s on 2000-01-01 (IERS:
+  +0.3555 s), −0.1772 s on 2020-01-01 (IERS: −0.1772 s) and +0.0709 s on
+  2026-01-30 (IERS: +0.0706 s). After the table it follows the ΔT prediction.
+  The ±0.9 s clamp is the bound the leap-second system maintains. With the
+  observed table it never engages: the largest estimated |DUT1| from 1972 is
+  0.81 s, and across each of the 27 leap seconds ΔT is continuous and UT1
+  advances by exactly the inserted second (to 10⁻¹⁰ s; `tools/reference_check.py`).
+  If the table falls behind the leap-second table and the ΔT prediction
+  drifts by more than about 0.1 s, the clamp can engage, and UT1 then jumps
+  where it starts or stops acting; refreshing the table ([§2.6](#26-δt))
+  prevents it.
+- **Continuity.** The held DUT1 is taken at the boundary instant itself, so
+  TT − UTC is the same on both sides of 2027-06-28 0h UTC (69.184 s, equal to
+  all 17 digits). At 1972-01-01, TT − UTC steps from the model
+  (42.250 s) to the exact 42.184 s, a jump of 0.066 s (0.003″ in the Sun's
+  position).
 - A DUT1 passed by the caller is used as given; in the exact era it changes
   UT1 but not TT.
 
@@ -768,8 +828,8 @@ Sensitivity to time errors:
   a 1 s error in TT moves the computed Sun by only 0.04″.
 - The Earth rotates 15.04″ per second of UT1, so a 1 s error in UT1 shifts
   hour angles, altitudes and azimuths by up to 15″. The estimated DUT1 is
-  usually within a few hundredths of a second (under 1″); DUT1 = 0 would allow
-  up to 0.9 s (13.5″).
+  within 7 ms of IERS from 1972 to 2026-09 (0.1″); DUT1 = 0 would allow up to
+  0.9 s (13.5″).
 
 **Leap seconds.** UTC is treated as a uniform scale within each day. A leap
 second (23:59:60) has no distinct representation and maps onto 00:00:00 of
@@ -790,36 +850,49 @@ from the Gregorian calendar-year fraction by 0.0075 days per year, 7.5 days by
 The pieces are evaluated in this order; the first one whose range contains y
 is used.
 
-**Observed values, 2005 ≤ y < 2026.** Annual values at the start of each year
-(IERS/USNO), interpolated linearly between consecutive years. The 2026 value
-is 69.184 s − (UT1 − UTC) with UT1 − UTC = +0.07 s from IERS Bulletin A
-(January 2026); the earlier values have not been re-checked against their
-source.
+**Observed values, 1972-01-01 to 2026-09-01.** Monthly values on the 1st of
+each month at 0h UTC, interpolated linearly in time:
+
+$$
+\Delta T = 32.184\ \text{s} + (\text{TAI} - \text{UTC}) - (\text{UT1} - \text{UTC}),
+$$
+
+with UT1 − UTC from the IERS EOP 20 C04 series and TAI − UTC from the IERS
+leap-second file. The 657 values are in `src/model/delta_t_observed.hpp`,
+generated by `tools/delta_t_table.py` from those two files. To refresh the
+table, download the current `eopc04.1962-now` and `Leap_Second.dat` from the
+IERS Earth Orientation Centre and run
+
+```sh
+python3 tools/delta_t_table.py eopc04.1962-now Leap_Second.dat > src/model/delta_t_observed.hpp
+```
+
+Values on 1 January:
 
 | Year | ΔT (s) | Year | ΔT (s) | Year | ΔT (s) |
 |---|---|---|---|---|---|
-| 2005 | 64.69 | 2013 | 66.91 | 2021 | 69.36 |
-| 2006 | 64.85 | 2014 | 67.28 | 2022 | 69.29 |
-| 2007 | 65.15 | 2015 | 67.64 | 2023 | 69.18 |
-| 2008 | 65.46 | 2016 | 68.10 | 2024 | 69.10 |
-| 2009 | 65.78 | 2017 | 68.59 | 2025 | 69.07 |
-| 2010 | 66.07 | 2018 | 68.97 | 2026 | 69.11 |
-| 2011 | 66.32 | 2019 | 69.22 | | |
-| 2012 | 66.60 | 2020 | 69.36 | | |
+| 1972 | 42.2295 | 2000 | 63.8285 | 2023 | 69.2038 |
+| 1980 | 50.5390 | 2010 | 66.0699 | 2024 | 69.1752 |
+| 1990 | 56.8552 | 2020 | 69.3612 | 2025 | 69.1377 |
+| | | 2022 | 69.2945 | 2026 | 69.1099 |
 
-**Near future, 2026 ≤ y < 2050.** A bridge from the last observed value that
-starts flat, as observed ΔT has been flat or slightly falling since 2021 (the
-Earth's rotation has recently sped up, against the long-term trend), and
+Monthly sampling follows the seasonal variation of the Earth's rotation
+(about ±0.03 s over a year), which annual values cannot.
+
+**Near future, 2026-09-01 ≤ y < 2050.** A bridge from the last observed value
+that starts flat, as observed ΔT has been flat or slightly falling since 2021
+(the Earth's rotation has recently sped up, against the long-term trend), and
 curves up to the Espenak–Meeus 93 s at 2050 so the next piece stays
-continuous. With u = (y − 2026)/24:
+continuous. With y<sub>0</sub> = 2026.6653 (2026-09-01) and
+u = (y − y<sub>0</sub>)/(2050 − y<sub>0</sub>):
 
 $$
-\Delta T = 69.11 + (93 - 69.11)\,u^2 .
+\Delta T = 69.1815 + (93 - 69.1815)\,u^2 .
 $$
 
-It gives 69.77 s in 2030 and 77.24 s in 2040. Any value past the observed
+It gives 69.67 s in 2030 and 76.96 s in 2040. Any value past the observed
 table is a prediction; for comparison, the Espenak–Meeus 2005–2050 polynomial
-already overestimates 2025 by about 5.4 s (74.47 s against 69.07 s). Until
+already overestimates 2025 by about 5.3 s (74.47 s against 69.14 s). Until
 2027-06-28 the bridge does not affect TT (exact from leap seconds), only the
 estimated DUT1 (§2.5).
 
@@ -833,8 +906,7 @@ $$
 
 | Range | Variable | ΔT (s) |
 |---|---|---|
-| 1986 ≤ y < 2005 | t = y − 2000 | 63.86 + 0.3345t − 0.060374t² + 0.0017275t³ + 0.000651814t⁴ + 0.00002373599t⁵ |
-| 1961 ≤ y < 1986 | t = y − 1975 | 45.45 + 1.067t − t²/260 − t³/718 |
+| 1961 ≤ y < 1972-01-01 | t = y − 1975 | 45.45 + 1.067t − t²/260 − t³/718 |
 | 1941 ≤ y < 1961 | t = y − 1950 | 29.07 + 0.407t − t²/233 + t³/2547 |
 | 1920 ≤ y < 1941 | t = y − 1920 | 21.20 + 0.84493t − 0.076100t² + 0.0020936t³ |
 | 1900 ≤ y < 1920 | t = y − 1900 | −2.79 + 1.494119t − 0.0598939t² + 0.0061966t³ − 0.000197t⁴ |
@@ -848,6 +920,24 @@ $$
 
 In the 1800–1860 fit the large terms nearly cancel, and the t⁷ term is
 essential: without it the fit diverges by thousands of seconds by 1860.
+
+**Joins.** The published pieces are used as published, so ΔT jumps where one
+hands over to the next (value at the boundary minus the limit from below,
+measured by `tools/reference_check.py`, section `delta_t_pieces`):
+
+| Boundary | Jump | Boundary | Jump |
+|---|---|---|---|
+| −500 | −0.024 s | 1900 | −0.088 s |
+| 500 | −0.087 s | 1920 | +0.012 s |
+| 1600 | −0.251 s | 1941 | +0.001 s |
+| 1700 | −0.162 s | 1961 | +0.030 s |
+| 1800 | −0.036 s | 1972-01-01 (table) | −0.021 s |
+| 1860 | +0.050 s | 2026-09-01, 2050, 2150 | 0 |
+
+A jump changes TT only; UT1, and so the Earth's rotation, is unaffected. The
+largest, 0.25 s, moves the Sun by 0.01″ (0.041″ per second of TT), which
+shifts an event instant on that date by about 0.7 ms at the equator, and more
+where the Sun crosses the horizon at a shallow angle.
 
 ΔT itself cannot be overridden through the API; supplying DUT1 fixes UT1, and
 from 1972 to 2027-06-28 TT is exact regardless (§2.5).
@@ -1123,9 +1213,17 @@ $$
 \qquad(\text{Meeus 25.10}),
 $$
 
-since 20.49552″ × (1 − 0.0167086²) = 20.4898″. What is neglected is the effect
-in latitude, which is proportional to β, and the Sun's own motion about the
-barycenter of the solar system.
+since 20.49552″ × (1 − 0.0167086²) = 20.4898″. What is neglected:
+
+- The Earth's motion about the Earth–Moon barycentre, about 12.4 m/s. VSOP87D
+  includes it in the position, but the Keplerian velocity above does not. It
+  gives a monthly term of 0.0093″ amplitude, and with the planetary
+  perturbations of the Earth's velocity the total stays within 0.010″
+  (measured against DE421, `tools/reference_check.py`).
+- The effect in latitude, proportional to β: below 0.001″.
+
+The Sun's own motion about the barycentre of the solar system is not an error
+term: to first order it cancels between light time and aberration.
 
 The apparent ecliptic position is then
 
@@ -1186,8 +1284,11 @@ Spp removes the large part exactly:
    [0°, 360°).
 
 The largest intermediate stays below about 10³°. Compared with the formula
-evaluated in exact rational arithmetic over 1000 BC–3000 AD, the direct form
-errs by up to 3.8 × 10⁻⁴″ and the split form by 1.9 × 10⁻⁷″.
+evaluated in exact rational arithmetic, with its decimal coefficients exact,
+at 3,000 random instants over 1000 BC–3000 AD, the split form errs by up to
+1.9 × 10⁻⁷″, and the formula evaluated as written in double, left to right,
+by up to 3.6 × 10⁻⁴″ (`tools/reference_check.py`, section `gmst_exact`). The
+direct figure depends on the instants and the order of evaluation.
 
 **Apparent and local sidereal time.** The equation of the equinoxes
 converts mean to apparent sidereal time:
@@ -1351,46 +1452,71 @@ Refraction does not change the azimuth.
 
 #### 13.1 Definitions
 
-| Event | Condition on the Sun's center |
+| Event | Condition |
 |---|---|
-| Sunrise, sunset | Apparent (refracted, topocentric) altitude = −(959.63″/R) |
-| Civil twilight | Apparent altitude = −6° |
-| Nautical twilight | Apparent altitude = −12° |
-| Astronomical twilight | Apparent altitude = −18° |
-| Any event | Apparent altitude = any target, via `events::crossing` |
+| Sunrise, sunset | Apparent (refracted, topocentric) altitude of the upper limb = 0 |
+| Civil twilight | Apparent altitude of the center = −6° |
+| Nautical twilight | Apparent altitude of the center = −12° |
+| Astronomical twilight | Apparent altitude of the center = −18° |
+| Any event | Apparent altitude of the center (`events::crossing`) or of the upper limb (`events::upper_limb_crossing`) = any target |
 | Transit | Hour angle of the apparent Sun = 0 |
 
-- **959.63″/R** is the Sun's apparent semidiameter at distance R (AU), so the
-  event is the upper limb touching the horizon. It varies from 15.73′ in July
-  to 16.27′ in January; `events::day` takes it at transit
-  (`sun::semidiameter_deg`). The constant `events::upper_limb_deg` (−16′) is
-  its mean, for use with `events::crossing`.
+- **Upper limb.** The point of the disk one semidiameter s = 959.63″/R above
+  the topocentric center, on its vertical circle. Its geometric altitude is
+  h + s, where h is the center's geometric (unrefracted) topocentric altitude,
+  and its apparent altitude is that altitude refracted
+  ([§12](#12-atmospheric-refraction)). s is taken at each instant (15.73′ in
+  July to 16.27′ in January; `events::upper_limb_altitude_deg`). The
+  topocentric semidiameter differs from s by a factor 1 + sin π sin h, below
+  10⁻⁶ near the horizon.
+- **Why the limb is refracted on its own.** Near the horizon, refraction grows
+  by 2.7′ over the 16′ from the upper limb down to the center (34.4′ to 37.2′
+  with the default atmosphere). Refracting the center and subtracting s would
+  put the upper limb 2.7′ below the horizon at sea level, not on it.
 - **Twilights** lie at −4° and lower, where no refraction is applied
-  ([§12](#12-atmospheric-refraction)), so they are geometric altitudes.
+  ([§12](#12-atmospheric-refraction)), so they are geometric altitudes of the
+  center.
 - **Transit** uses the geocentric hour angle. Parallax does not move it, and
   diurnal aberration moves the topocentric transit by at most about 0.023 s
   ([§10](#10-topocentric-parallax)).
 
+**Specification and verification.** Each condition, the code that solves it,
+and how `tools/reference_check.py` verifies it:
+
+| Event | Condition solved | Code | Verified against |
+|---|---|---|---|
+| Transit | Geocentric apparent hour angle H = GAST + λ − α = 0 | `transit_impl` (`src/events.cpp`) | The same condition with JPL DE421 and IAU 2006/2000A sidereal time (within 2.3 ms); \|H\| ≤ 10⁻⁹° in Spp's own pipeline |
+| Sunrise, sunset | refraction(h + s) = 0, h the geometric topocentric altitude of the center, s = 959.63″/R at the instant | `upper_limb_altitude_from`, `crossing_impl` with `Point::UpperLimb`, `day` | The same condition with DE421 geometry and the same refraction model (within 11 ms at 0°–64°, 0.45 s at 69°–78°); residual ≤ 10⁻⁵″ in Spp's own pipeline |
+| Twilights, any center target | refraction(h) = target (geometric below −4°) | `altitude_from`, `crossing_impl` with `Point::Center` | Civil twilight with DE421 geometry (within 6.3 ms at 0°–49°, 0.8 s at 64°–78°); residual ≤ 10⁻⁵″ |
+| Day type | Sign of the sunrise condition at transit and 12 h either side | `day` | The sign of the condition sampled every 10 minutes over the 24 h around transit (0 disagreements over 2000–2026 at 8 sites) |
+
+The time differences at high latitudes come from the 0.06″ geometric
+agreement ([Error budget](#error-budget)) on days when the Sun grazes the
+condition and the altitude changes by a few hundredths of an arcsecond per
+second. The offset from the almanac convention is the difference between the
+two conditions: the reference solves both with the same geometry, and Spp's
+offset matches the predicted one to the same 11 ms.
+
 **Relation to the almanac convention.** Almanacs define sunrise and sunset
 as the geometric altitude of the center at −0.8333°: the 34′ of refraction at
-the horizon plus the 16′ semidiameter, both taken as fixed. Spp instead
-refracts the center itself, which sits a semidiameter below the horizon, where
-the refraction is larger. With the default atmosphere and a 16′ semidiameter,
-its condition corresponds to a geometric altitude of −0.8956° (37.74′ of
-refraction). So Spp's sunrise comes earlier and its sunset later than the
-almanac convention, symmetrically (measured, sea level, 2026, with the actual
-semidiameter):
+the horizon plus the 16′ semidiameter, both taken as fixed. With the default
+atmosphere (1010 mbar, 10 °C) and a 16′ semidiameter, Spp's condition puts the
+upper limb at a geometric altitude of −0.5739° (34.43′ of refraction) and the
+center at −0.8406°. So Spp's sunrise comes slightly earlier and its sunset
+slightly later than the almanac convention, symmetrically (measured, sea
+level, 2026, with the actual semidiameter):
 
 | Place and date | Sunrise | Sunset |
 |---|---|---|
-| Equator, March equinox | −15.2 s | +15.2 s |
-| 48.86° N (Paris), June solstice | −26.6 s | +26.6 s |
-| 48.86° N (Paris), December solstice | −30.4 s | +30.4 s |
-| 60° N, June solstice | −48.0 s | +48.0 s |
+| Equator, March equinox | −2.0 s | +2.0 s |
+| 48.86° N (Paris), June solstice | −1.4 s | +1.3 s |
+| 48.86° N (Paris), December solstice | −5.2 s | +5.2 s |
+| 60° N, June solstice | −2.4 s | +2.4 s |
 
-The difference grows with latitude because the Sun crosses the horizon at a
-shallower angle. To reproduce the almanac convention exactly, solve for the
-geometric altitude −0.8333° with refraction disabled:
+The difference changes over the year with the semidiameter (15.73′ in July,
+16.27′ in January) and grows with latitude because the Sun crosses the horizon
+at a shallower angle. To reproduce the almanac convention exactly, solve for
+the geometric altitude −0.8333° with refraction disabled:
 `events::crossing(transit, obs, {.refraction = false}, -50.0 / 60.0, dir)`.
 
 #### 13.2 One day
@@ -1400,15 +1526,17 @@ geometric altitude −0.8333° with refraction disabled:
 1. **First guess.** Local solar noon is taken as 12:00 − λ<sub>obs</sub>/15 h
    UTC on the given date, split into whole hours, minutes and seconds.
 2. **Transit** is refined from it ([§13.3](#133-transit)).
-3. **Target.** The limb altitude is −s, with s = 959.63″/R at transit.
-4. **Classification.** h<sub>noon</sub> is the apparent altitude at transit,
-   and h<sub>before</sub>, h<sub>after</sub> the apparent altitudes 12 h
-   before and after it, approximating the two lower culminations.
-   - h<sub>noon</sub> < −s: `PolarNight`, duration 0 h.
-   - h<sub>before</sub> > −s and h<sub>after</sub> > −s: `PolarDay`,
-     duration 24 h.
+3. **Condition.** u(t) is the apparent altitude of the upper limb
+   ([§13.1](#131-definitions)).
+4. **Classification.** u<sub>noon</sub> is u at transit, and
+   u<sub>before</sub>, u<sub>after</sub> are u 12 h before and after it,
+   approximating the two lower culminations.
+   - u<sub>noon</sub> < 0, u<sub>before</sub> ≤ 0 and u<sub>after</sub> ≤ 0:
+     `PolarNight`, duration 0 h.
+   - u<sub>noon</sub> ≥ 0, u<sub>before</sub> > 0 and u<sub>after</sub> > 0:
+     `PolarDay`, duration 24 h.
    - Otherwise `Normal`.
-5. **Rise and set** are the crossings of −s before and after transit
+5. **Rise and set** are the instants u = 0 before and after transit
    ([§13.4](#134-crossings)).
 6. **Duration** is the time above the horizon within the 24 h centered on
    transit: set − rise, in hours, computed from the split JDs. Rise and set
@@ -1418,8 +1546,20 @@ geometric altitude −0.8333° with refraction disabled:
 but does not set again within 12 h of transit; on the first day after it, the
 Sun sets but was already up 12 h before transit. Such a day is `Normal` with
 only one of `rise` and `set`, and the missing end of the window counts as
-daylight. For example, at 70° N on 2026-07-27 the Sun sets at 23:44:30 UTC
-with no sunrise, and the duration is 23.63 h.
+daylight. For example, at 70° N on 2026-07-27 the Sun sets at 23:38:28 UTC
+with no sunrise, and the duration is 23.53 h.
+
+**At the poles.** At ±90° every meridian passes through the observer, so
+transit is only the instant the Sun crosses the observer's longitude, and the
+altitude barely depends on the hour angle. Around an equinox, the change in
+declination over 12 h (about 0.2°) exceeds the daily swing of the altitude,
+so the day's highest point can fall at an edge of the window rather than at
+transit. When u<sub>noon</sub> < 0 but the limb is above the horizon at an
+edge, the day is `Normal`: the Sun set before transit (a set between the edge
+and transit) or rises after it (a rise between transit and the edge), found by
+the same refinement as [§13.4](#134-crossings). `spp_day_scan` checks the day
+type and events against the condition sampled every 2 minutes, for every day
+of a year at 60°–90° in both hemispheres (88,330 days, no inconsistency).
 
 #### 13.3 Transit
 
@@ -1446,10 +1586,11 @@ steps.
 
 #### 13.4 Crossings
 
-`events::crossing` finds when the apparent altitude reaches a target
-h<sub>t</sub> on one side of transit. With f(t) = h(t) − h<sub>t</sub>,
-f ≥ 0 at transit is required; otherwise there is no crossing and the result
-is empty.
+`events::crossing` finds when the apparent altitude of the center reaches a
+target h<sub>t</sub> on one side of transit; `events::upper_limb_crossing` does
+the same for the upper limb. With f(t) = h(t) − h<sub>t</sub>, h the altitude
+of the chosen point, f ≥ 0 at transit is required; otherwise there is no
+crossing and the result is empty.
 
 **1. Analytic first guess.** From the altitude equation of
 [§11](#11-horizontal-coordinates), the hour angle at which a body of
@@ -1460,8 +1601,10 @@ $$
 $$
 
 Here δ is the Sun's declination at transit, and the target is converted to a
-geometric altitude by h₀ = h<sub>t</sub> − r, where r = refraction(h<sub>t</sub>)
-− h<sub>t</sub> estimates the refraction at the event. If |cos H₀| < 1, the
+geometric altitude of the center by h₀ = h<sub>t</sub> − r − s, where
+r = refraction(h<sub>t</sub>) − h<sub>t</sub> estimates the refraction at the
+event, and s is the semidiameter at transit for the upper limb (0 for the
+center). If |cos H₀| < 1, the
 guess is t<sub>transit</sub> ± H₀/360 days, with H₀ in degrees: minus before
 transit, plus after.
 
@@ -1537,10 +1680,14 @@ so that $g(x) \approx \sum_{m=0}^{N} c_m T_m(x)$.
 
 **Offset.** Each quantity is fitted as the residual g = X − X<sub>mid</sub>
 from its value at the middle node. VSOP87D longitude reaches about
-2 × 10⁴ rad, and fitting it directly would cost about 10 bits of precision
-to rounding in the coefficients. L advances about 0.28 rad over a segment, so
-the residual from the middle node is at most about 0.14 rad. The offset is
-added back as the last operation, with a single rounding.
+2 × 10⁴ rad, and fitting it directly puts the rounding of that magnitude into
+every coefficient. L advances about 0.28 rad over a segment, so the residual
+from the middle node is at most about 0.14 rad. The offset is added back as the
+last operation, with a single rounding. Measured by `spp_cache_check` at 2,000
+random instants, the worst error in L is 7.5 × 10⁻⁶″ with the offset and
+1.9 × 10⁻⁵″ without it, 2.6 times larger (1.4 bits); B and R are unaffected.
+The gain is small because the rounding of the series' own phases dominates
+both.
 
 **Evaluation.** Clenshaw's recurrence, run for the five quantities in the
 same loop so that their independent dependency chains overlap:
@@ -1564,8 +1711,9 @@ m > ωh. Taking the worst cases for h = 8 days:
 
 The measured error confirms it (see [Accuracy](#accuracy)). The fit is exactly
 as close to the true series as direct double-precision evaluation, and the
-closer of the two varies at random. Longer segments (32 days) were measured to
-start adding error in B.
+closer of the two varies at random. Longer segments add fit error: with 32-day
+segments and the same degree, the worst error in B grows from 2.9 × 10⁻¹¹″ to
+4.1 × 10⁻⁹″ and in R from 9.1 × 10⁻¹⁴ to 2.5 × 10⁻¹³ AU (`spp_cache_check`).
 
 **Cache.** Segments are kept in a 64-slot direct-mapped table, slot
 k mod 64, of 1,048 bytes each (67 KB), declared `thread_local`. That covers
@@ -1597,17 +1745,20 @@ split GMST is more accurate than the direct form.
 
 | Source | Size | Affects |
 |---|---|---|
-| VSOP87D theory (complete series) | About 1″ over several thousand years around J2000 (authors' estimate) | Solar longitude, latitude, distance |
+| VSOP87D theory (complete series), measured against JPL ephemerides | Against DE421 (1900–2050): 0.010″ RMS in longitude once the frame drift below is removed, 0.06″ in latitude, 10 km in distance. Against DE431: 0.3″ over 1900–2100, up to 2.8″ at 0–1000 AD and 3.8″ at 2500–3000 AD, almost all in longitude; this includes the difference between VSOP87D's precession and the reference's long-term precession | Solar longitude, latitude, distance |
+| Frame: FK5 equator and equinox of date | Drifts 0.274″ per century in longitude from the IAU 2006 equinox (0.3″ at 1900 and 2050). Sidereal time uses the same equinox, so the drift cancels in the hour angle | Right ascension, apparent longitude; not altitude, azimuth or events |
+| Sidereal time: the IAU 1982 GMST polynomial far from J2000 | Hour angle against the Earth Rotation Angle with long-term precession: within 0.16″ over 1600–2100, 1.1″ at 3000 AD, 4.5″ at 1 AD, 25″ at 1000 BC | Hour angle, altitude, azimuth, event times |
 | Nutation: the IAU 1980 theory itself (full 106-term series) | A few hundredths of an arcsecond against modern nutation (IAU 2000A) | Apparent place, sidereal time |
-| Aberration: none in latitude, no barycentric motion of the Sun | Below 0.01″ | Apparent place |
+| Aberration as −20.4898″/R: omits the Earth's monthly motion about the Earth–Moon barycentre (about 12.4 m/s), and aberration in latitude | Up to 0.010″ in longitude, almost all a monthly term of 0.0093″ amplitude; below 0.001″ in latitude (light time and aberration against DE421, `tools/reference_check.py`). The Sun's own barycentric motion cancels between light time and aberration to first order | Apparent place |
 | Equation of the equinoxes without the 1994 terms | Below 0.003″ | Sidereal time |
 | Polar motion, not applied | Up to about 0.5″ (15 m) in the observer's coordinates; about 0.03 s in rotation | Hour angle, altitude, event times |
 | TT, 1972 to 2027-06-28 | Exact (leap seconds, §2.5) | Solar position |
 | TT outside that span: ΔT model | Seconds (recent past, near future) to hours (antiquity) → 0.041″ per second | Solar position |
-| ΔT prediction after 2026 ([§2.6](#26-δt)) | Unknown and growing with time | Solar position; estimated DUT1 |
-| Estimated DUT1, 1972 to 2027 ([§2.5](#25-time-scales)) | Typically a few hundredths of a second (0.03 s at 2000.0) → under 1″ | Hour angle, altitude, azimuth, event times |
+| ΔT prediction after 2026-09 ([§2.6](#26-δt)) | Unknown and growing with time | Solar position; estimated DUT1 |
+| Estimated DUT1, 1972 to 2026-09 ([§2.5](#25-time-scales)) | Within 6.7 ms of IERS → under 0.1″ | Hour angle, altitude, azimuth, event times |
+| Estimated DUT1, 2026-09 to 2027-06-28 | Follows the ΔT prediction ([§2.6](#26-δt)) | Hour angle, altitude, azimuth, event times |
 | DUT1 = 0 before 1972 | UTC is taken as UT1 | Hour angle, altitude, azimuth, event times |
-| Sunrise/sunset definition vs the almanac convention ([§13.1](#131-definitions)) | Sunrise 15–48 s earlier (sunset later) at 0°–60° latitude | Rise/set |
+| Sunrise/sunset definition vs the almanac convention ([§13.1](#131-definitions)) | Sunrise 1–6 s earlier (sunset later) at 0°–60° latitude | Rise/set |
 | Real atmosphere vs model | Often minutes near the horizon | Rise/set, low altitudes |
 | Numerical error | See below | Everything |
 
@@ -1631,28 +1782,58 @@ Numerical error is far below the model error:
   about 10⁶ rad at the ends of the range. The larger figure for L reflects
   that |L| itself reaches 1.9 × 10⁴ rad (at 1000 BC).
 - **GMST** is within 1.9e-7″ of the formula evaluated in exact rational
-  arithmetic ([§9](#9-sidereal-time-and-hour-angle)).
+  arithmetic ([§9](#9-sidereal-time-and-hour-angle), `tools/reference_check.py`).
 - **Events.** Transits converge to below 10⁻⁹° of hour angle (~0.2 µs). Rise,
   set and twilight instants converge to 1 µs, and their altitude residuals are
   below 10⁻⁵″.
+- **Whole pipeline.** `spp_pipeline_check` evaluates every step again in 80-bit
+  extended precision, from the models' own coefficients, and compares with
+  the library at 20,000 random instants and observers and 4,000 random days
+  over 1000 BC–3000 AD:
+
+  | Quantity | Max | RMS | Bias |
+  |---|---|---|---|
+  | Right ascension × cos δ | 9.7e-6″ | 1.5e-6″ | −3.4e-8″ |
+  | Declination | 4.0e-6″ | 4.5e-7″ | 1.3e-9″ |
+  | Altitude (refracted) | 1.0e-5″ | 9.8e-7″ | −4.5e-9″ |
+  | Azimuth × cos h | 9.1e-6″ | 1.2e-6″ | −2.1e-9″ |
+  | Transit | 0.63 µs | 0.11 µs | −0.004 µs |
+  | Sunrise, sunset, \|φ\| ≤ 60° | 0.74 µs | 0.12 µs | −0.009 µs |
+  | Sunrise, sunset, \|φ\| > 60° | 3.8 µs | 0.35 µs | −0.004 µs |
+  | Civil dusk, \|φ\| ≤ 55° | 0.83 µs | 0.15 µs | −0.004 µs |
+
+  Positions inherit the rounding of the VSOP87D phases (the L row of the cache
+  table); event instants add the 1 µs solver tolerance.
 
 ---
 
 ## Performance
 
-Measured with `spp_bench` on one core (release build). Each measurement runs
-once before it is timed, so all of them see the ephemeris cache already
-filled for the instants they use:
+Measured with `spp_bench` on one thread: Linux x86-64 (Intel Xeon, 4 vCPU
+cloud VM), GCC 14.2, Release build (`-O3`), Spp 1.0.1. The speed depends on
+whether the 16-day cache segment of the instant is already filled
+([Chebyshev earth state](#chebyshev-earth-state)):
 
-| Operation | Time |
-|---|---|
-| `sun::apparent` | 0.17 µs |
-| `events::altitude_deg` (includes the apparent Sun) | 0.43 µs |
-| `events::day` (transit, rise, set) | 7.5 µs |
-| `spp year` (365 days, including process start-up) | ~60 ms |
+| Operation | Warm cache | Cold cache |
+|---|---|---|
+| `sun::apparent` | 0.18 µs | |
+| `events::altitude_deg` (includes the apparent Sun) | 0.47 µs | 0.91 ms |
+| `events::day` (transit, rise, set) | 7.9 µs | 0.97 ms |
+| `spp year` (365 days, including process start-up) | 29 ms | |
 
-Filling one 16-day cache segment costs 25 direct series evaluations, about
-0.3 ms. How the rest is achieved is described in
+- **Warm:** consecutive instants (`sun::apparent`, `altitude_deg`) or a year of
+  days at 19 latitudes (`day`). Each measurement runs once before it is timed,
+  so the segments it uses are already filled. This is the batch case the
+  library is built for: one segment serves every query within its 16 days.
+- **Cold:** random instants or dates over 1000 BC–3000 AD, timed on first use,
+  so nearly every query fills a new segment first: 25 direct evaluations of
+  the series (2,425 VSOP87D terms and 106 nutation terms each), about 0.9 ms.
+  A query pattern that jumps between distant dates pays this on every call.
+  The per-thread cache holds 64 segments (about 2.8 years of consecutive
+  dates).
+- `spp year` was timed from the shell over five runs.
+
+How the warm path is achieved is described in
 [Numerical methods](#numerical-methods).
 
 ---
@@ -1661,12 +1842,28 @@ Filling one 16-day cache segment costs 25 direct series evaluations, about
 
 | Target | What it checks |
 |---|---|
-| `spp_cache_check` | The Chebyshev cache and direct double evaluation, both against the same series evaluated in 80-bit extended precision, at random instants over 1000 BC–3000 AD, densely inside segments, and on both sides of segment boundaries. The cache passes when its worst error is at most twice that of direct evaluation (rounding noise); the program prints PASS or FAIL and exits with 0 or 1. It refuses to compile where `long double` is no wider than `double` |
-| `spp_bench` | Throughput of `sun::apparent`, `events::altitude_deg` and `events::day` over a year × latitude grid |
+| `spp_cache_check` | The Chebyshev cache and direct double evaluation, both against the same series evaluated in 80-bit extended precision, at random instants over 1000 BC–3000 AD, densely inside segments, and on both sides of segment boundaries. The cache passes when its worst error is at most twice that of direct evaluation (rounding noise); the program prints PASS or FAIL and exits with 0 or 1. It also measures the cache's design choices: the same fit without the offset, and with 32-day segments ([Chebyshev earth state](#chebyshev-earth-state)). It refuses to compile where `long double` is no wider than `double` |
+| `spp_bench` | Throughput of `sun::apparent`, `events::altitude_deg` and `events::day`: warm (consecutive instants, a year × latitude grid) and cold (random instants and dates over 1000 BC–3000 AD, each filling a new cache segment) |
+| `spp_pipeline_check` | The whole pipeline (time scales, VSOP87D through the cache, nutation, obliquity, apparent place, sidereal time, parallax, diurnal aberration, horizontal coordinates, refraction, transit, sunrise, sunset, civil twilight) against the same models evaluated in 80-bit extended precision without the library's code. Reports max, RMS and bias over 1000 BC–3000 AD and passes when every maximum is within about twice the rounding level ([Numerical error](#numerical-error)); prints PASS or FAIL and exits with 0 or 1. This is the reference for [R] changes (Constitution, Article II) |
+| `spp_day_scan` | `events::day` against its own condition sampled every 2 minutes over the 24 h around transit, for every day of a year at 60°–90° latitude in 0.25° steps, both hemispheres: the day type, the presence of sunrise or sunset on normal days, and the condition at each event. Prints PASS or FAIL and exits with 0 or 1 |
+| `spp_readme_numbers` | Prints, from the library, the figures this README quotes about events, sidereal time and time scales: day lengths, solar noon and sunrise/sunset azimuths in the Gallery, the upper-limb condition in geometric terms and the offsets from the almanac convention (§13.1), the day next to polar day (§13.2), the hour-angle rate (§13.3), the 1972 TT − UTC step and the held DUT1 (§2.5), the ΔT bridge (§2.6) |
 | `spp_figures` | Renders the figures in `docs/images/` as SVG from the library's results: daylight and twilight, day length by latitude, analemma, sun paths, azimuth spirals |
+| `tools/reference_check.py` with `spp_dump` | Correctness against independent references: leap seconds and DUT1 against IERS, the calendar against Swiss Ephemeris, nutation and sidereal time against ERFA (IAU SOFA), the hour angle against the Earth Rotation Angle with long-term precession, the apparent Sun against JPL DE421 and DE431, topocentric coordinates against DE421, and transit, sunrise, sunset, civil twilight and day type against their definitions solved with DE421 geometry at 8 sites from 78° S to 78° N. Each check has a limit set by the documented model difference ([Error budget](#error-budget)); the program prints PASS or FAIL and exits with 0 or 1 |
+
+`reference_check.py` needs Python 3 with a few packages, and downloads the
+Swiss Ephemeris files (13 MB, compressed JPL DE431) on first use:
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install skyfield skyfield-data pyerfa pyswisseph numpy astropy-iers-data
+.venv/bin/python -I tools/reference_check.py build/release/spp_dump --json reference_check.json
+```
 
 ```sh
 ./build/release/spp_cache_check
+./build/release/spp_pipeline_check
+./build/release/spp_day_scan
+./build/release/spp_readme_numbers
 cmake --preset release -DSPP_BUILD_BENCH=ON && cmake --build --preset release && ./build/release/spp_bench
 cmake --preset release -DSPP_BUILD_FIGURES=ON && cmake --build --preset release && ./build/release/spp_figures docs/images
 ```
@@ -1687,6 +1884,13 @@ Seasonal++/
 ├── tools/
 │   ├── vsop_gen.cpp              .ear → exact C++ tables, run at build time
 │   ├── cache_check.cpp           cache accuracy against extended precision
+│   ├── pipeline_check.cpp        whole pipeline against extended precision
+│   ├── day_scan.cpp              day type and events against dense sampling, 60°-90°
+│   ├── readme_numbers.cpp        the README's event and time-scale figures
+│   ├── spp_dump.cpp              prints library results for reference_check.py
+│   ├── reference_check.py        correctness against independent references
+│   ├── hour_angle_cio.py         hour angle from the Earth Rotation Angle (reference)
+│   ├── delta_t_table.py          observed ΔT table from the IERS files
 │   ├── bench.cpp                 benchmark
 │   └── figures.cpp               renders the README figures (SVG)
 ├── docs/images/                  README figures
@@ -1696,8 +1900,9 @@ Seasonal++/
 │   ├── sun.hpp  earth.hpp  sky.hpp  events.hpp
 │   └── model/                    vsop87d, iau1980, laskar, meeus, espenak_meeus, saemundsson
 ├── src/
-│   ├── core/  model/             implementations
+│   ├── core/  model/             implementations (model/delta_t_observed.hpp: generated ΔT table)
 │   ├── sun.cpp  earth.cpp  sky.cpp  events.cpp
+│   ├── observe.{hpp,cpp}         the position pipeline shared by sun::horizontal and events
 │   └── earth_state.{hpp,cpp}     Chebyshev earth-state cache
 └── apps/
     ├── spp/main.cpp              command-line tool (demonstration front end)
@@ -1738,10 +1943,11 @@ Seasonal++/
 - **Rise/set with a raised horizon** (mountains, observer height above
   terrain) is not modelled: elevation sets the parallax and the default
   pressure, but the dip of the horizon is not applied. A crossing of the
-  dipped horizon can be solved with `events::crossing` and the target
-  altitude −(semidiameter + dip).
-- **Compilers.** Developed and tested with GCC 15 only. The Clang and MSVC
-  flags in `cmake/SppFlags.cmake` are untested.
+  dipped horizon can be solved with `events::upper_limb_crossing` and the
+  target altitude −dip.
+- **Compilers.** Developed with GCC 15 on Windows; built and checked with
+  GCC 14.2 and Clang 18 on Linux x86-64. The MSVC flags in
+  `cmake/SppFlags.cmake` are untested.
 
 Known defects of the current release, with workarounds, are listed on the
 wiki's [Known issues](http://github.com/Nouni2/Seasonal-plus-plus/wiki/Known-Issues) page.
@@ -1763,7 +1969,8 @@ wiki's [Known issues](http://github.com/Nouni2/Seasonal-plus-plus/wiki/Known-Iss
 - F. Espenak, J. Meeus, *Five Millennium Canon of Solar Eclipses*, NASA
   TP-2006-214141 (2006): polynomial expressions for ΔT.
 - T. Saemundsson, *Astronomical refraction*, Sky and Telescope 72, 70 (1986).
-- IERS / USNO: observed values of ΔT and DUT1.
+- IERS Earth Orientation Centre: EOP 20 C04 series (UT1 − UTC) and
+  `Leap_Second.dat` (TAI − UTC), from which the observed ΔT table is derived.
 - NIMA TR8350.2, *Department of Defense World Geodetic System 1984*: WGS84
   ellipsoid.
 
@@ -1774,6 +1981,93 @@ wiki's [Known issues](http://github.com/Nouni2/Seasonal-plus-plus/wiki/Known-Iss
 Spp follows [Semantic Versioning](https://semver.org). From 1.0.0 on, a
 release that breaks the public API (the headers under `include/spp/`) raises
 the major version. `find_package(Spp 1.0)` accepts any 1.x release.
+
+### 1.0.1 (unreleased)
+
+Correctness release. **Results change**; the existing API is unchanged.
+
+- **Sunrise and sunset now solve the documented condition** (#1): the
+  refracted upper limb at 0. 1.0.0 refracted the center and subtracted the
+  semidiameter, which left the upper limb 2.7′ below the horizon: every sunrise
+  was early and every sunset late, by 8.5–25 s at 0°–50° latitude, 30–90 s at
+  64° N, and up to 18 minutes on days next to polar day. Day length shrinks by
+  twice that. The day type (`PolarDay`, `PolarNight`) uses the same condition,
+  which changes it on about one day a year at 69°–78° N. Twilights,
+  `events::crossing`, transit and `events::altitude_deg` are bit-identical.
+- **Observed ΔT** (#2): the annual 2005–2026 table, wrong by up to 0.075 s in
+  2023–2025, and the 1961–2005 polynomials are replaced from 1972-01-01 by
+  monthly values derived from IERS EOP 20 C04 up to 2026-09-01. The estimated
+  DUT1 now matches IERS on the 1st of every month and is within 6.7 ms of it
+  on every day (it was off by up to 0.12 s). TT is unchanged from 1972 to
+  2027-06-28; hour angles, altitudes, azimuths and events change by up to 1.8″
+  or 0.12 s where DUT1 is estimated.
+- **`Instant` splits** (#3): every function that takes an `Instant` brings its
+  fraction into [0, 1) first, so any split of one instant gives the same
+  result. A hand-built `Instant` with the fraction outside [0, 1) gave wrong
+  positions, up to 179° in right ascension. Results for normalized instants are
+  bit-identical.
+- **Polar days at the poles** (#7): when the upper limb is below the horizon
+  at transit but above it at an edge of the 24 h window, which happens within
+  about 0.1° of a pole around an equinox, the day is `Normal` with the sunset
+  before transit or the sunrise after it, instead of `PolarNight`.
+- **Input validation** (#8): the `Time` factories throw `std::invalid_argument`
+  for dates that do not exist (2026-02-30, month 13, 1582-10-05 to 1582-10-14)
+  and for non-finite or out-of-range values, which reached undefined behaviour
+  in an integer conversion; the event solvers do the same for non-finite
+  observer coordinates and targets. 1.0.0 rolled invalid dates over silently
+  (2026-02-30 became 2026-03-02). Hours, minutes and seconds still carry over.
+- **Angles** (#9): `norm360` and the internal 2π wraps return values in
+  [0, 360) for every input; a tiny negative angle returned 360.
+- **ISO 8601** (#10): years outside 0…9999 are written with a sign and at least
+  four digits (`-0005`, not `-005`), in `iso_utc`, the new `iso_date` and the
+  `spp` command-line tool.
+- **TT after the leap-second table** (#11): the held DUT1 is taken at the end
+  of the table, 2027-06-28 0h UTC, so TT is continuous there (1.0.0 stepped by
+  0.5 ms). With the new ΔT bridge, which starts from the September 2026
+  value (#2), TT after 2027-06-28 is earlier than in 1.0.0 by 0.002–0.29 s up
+  to 2050 and by 0.01 s after it (0.012″ of solar longitude at most).
+- **ΔT joins** (#12): the source comment no longer claims the published pieces
+  join continuously; the measured jumps (up to 0.25 s, at 1600) are listed in
+  [§2.6](#26-δt).
+- **Published figures** (#35–#41): every figure in this README is produced by
+  a tool in the repository (`spp_readme_numbers`, `tools/reference_check.py`,
+  `spp_cache_check`, `spp_pipeline_check`, `spp_bench`). Corrected: the
+  segment fill cost (0.9 ms on the machine stated, not 0.3 ms); "reentrant",
+  which is "thread-safe"; the aberration term, which omits the Earth's motion
+  about the Earth–Moon barycentre (up to 0.010″), not the Sun's barycentric
+  motion; the 1972 TT − UTC step (42.250 s, 0.066 s); the direct-form GMST
+  error (3.6 × 10⁻⁴″ on the stated sample); the cache offset, which saves
+  1.4 bits, not about 10. The almanac table is measured against the corrected
+  sunrise definition, and the 32-day segment and hour-angle rate figures have
+  a tool.
+- **API, build and tool fixes** (#26–#32): `events::crossing` documents that
+  its first argument must be a transit and asserts it in debug builds; the
+  position pipeline exists once (`src/observe.cpp`), shared by
+  `sun::horizontal` and the event solvers, with bit-identical results; the
+  DUT1 clamp is shown never to engage from 1972 on, and UT1 and ΔT are checked
+  across every leap second; cross-compiling builds `vsop_gen` for the host
+  or runs it through the emulator; `libstdc++exp` is linked when a test link
+  needs it, for any compiler; the floating-point policy says that
+  `-fexcess-precision=standard` matters on x87 only; `spp` rejects `inf` and
+  `nan` arguments.
+- **Added**: `events::upper_limb_altitude_deg`, `events::upper_limb_crossing`,
+  `is_valid(CivilDate)`, `iso_date(CivilDate)`, `spp_day_scan`,
+  `spp_readme_numbers`;
+  `tools/delta_t_table.py`, which generates the observed ΔT table from the IERS
+  files.
+- **Validation** (#4, #5): `tools/reference_check.py` (with `spp_dump`) checks
+  the library against independent references: IERS, ERFA (IAU SOFA), JPL DE421
+  and DE431, and every event against its written definition
+  ([§13.1](#131-definitions)). `spp_pipeline_check` compares the whole pipeline
+  with an 80-bit evaluation of the same models and reports max, RMS and bias.
+- **Documentation** (#33, #34): performance figures state their machine,
+  compiler and build, and give the cold-cache cost (0.9 ms for a query in a new
+  16-day segment) next to the warm figures; `spp_bench` measures both. The
+  floating-point policy states what the flags guarantee: no compiler-introduced
+  contraction or excess precision, but last-bit differences from the platform's
+  math library, measured at 2 × 10⁻¹⁰″. The error budget gives the measured
+  VSOP87D accuracy against JPL ephemerides, the FK5 frame drift and the
+  long-term sidereal-time error.
 
 ### 1.0.0 (2026-09-29)
 

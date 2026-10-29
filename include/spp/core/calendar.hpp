@@ -23,4 +23,9 @@ struct CivilDateTime {
 
 bool is_gregorian(const CivilDate& d);   // on/after 1582-10-15
 
+// Whether the date exists in the calendar in use: month 1..12, day within the
+// month (leap years by the Julian rule before 1582-10-15, Gregorian after), and
+// not one of the ten days dropped by the reform, 1582-10-05 to 1582-10-14.
+bool is_valid(const CivilDate& d);
+
 }  // namespace spp

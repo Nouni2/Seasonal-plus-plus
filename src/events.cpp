@@ -4,38 +4,53 @@
 
 #include "spp/events.hpp"
 
+#include <cassert>
 #include <cmath>
+#include <stdexcept>
 
+#include "observe.hpp"
 #include "spp/core/angles.hpp"
-#include "spp/earth.hpp"
 #include "spp/sky.hpp"
-#include "spp/sun.hpp"
 
 namespace spp::events {
 
 namespace {
 
-// Everything about one instant that does not depend on the observer.
-// Nutation is computed once and shared by the apparent place and the
-// equation of the equinoxes, so both always use the same Δψ.
-struct Geocentric {
-    earth::Nutation nutation;
-    Equatorial sun;
-    Instant<UT1> ut1;
-};
-
-Geocentric geocentric(const Time& t) {
-    const auto tt = t.tt();
-    const auto n = earth::nutation(tt);
-    return {n, sun::apparent(tt, n), t.ut1()};
-}
+using detail::Geocentric;
+using detail::geocentric;
 
 double altitude_from(const Geocentric& g, const Observer& obs, const Atmosphere& atm) {
-    return sky::observe(g.sun, obs, earth::lst_deg(g.ut1, g.nutation, obs.lon_deg), atm).alt_deg;
+    return detail::observed(g, obs, atm).alt_deg;
+}
+
+// Apparent semidiameter at the instant of `g`: 959.63" / R.
+double semidiameter_from(const Geocentric& g) { return sun_radius_arcsec / g.sun.dist_au / 3600.0; }
+
+// Apparent altitude of the upper limb: the point of the disk one semidiameter
+// above the topocentric center on its vertical circle, refracted at its own
+// geometric altitude.
+double upper_limb_altitude_from(const Geocentric& g, const Observer& obs, const Atmosphere& atm) {
+    Atmosphere geometric = atm;
+    geometric.refraction = false;
+    const double center = altitude_from(g, obs, geometric);
+    return sky::refraction(center + semidiameter_from(g), sky::at_elevation(atm, obs.elev_m));
+}
+
+// The point of the disk an event refers to.
+enum class Point { Center, UpperLimb };
+
+double point_altitude_from(const Geocentric& g, const Observer& obs, const Atmosphere& atm, Point point) {
+    return point == Point::Center ? altitude_from(g, obs, atm) : upper_limb_altitude_from(g, obs, atm);
 }
 
 double hour_angle_deg(const Geocentric& g, double lon_east_deg) {
-    return wrap180(earth::lst_deg(g.ut1, g.nutation, lon_east_deg) - g.sun.ra_deg);
+    return wrap180(detail::lst_deg(g, lon_east_deg) - g.sun.ra_deg);
+}
+
+void require_finite(const Observer& obs, double target_alt_deg = 0.0) {
+    if (!std::isfinite(obs.lat_deg) || !std::isfinite(obs.lon_deg) || !std::isfinite(obs.elev_m))
+        throw std::invalid_argument("spp::events: observer coordinates are not finite");
+    if (!std::isfinite(target_alt_deg)) throw std::invalid_argument("spp::events: target altitude is not finite");
 }
 
 Time approx_noon(const CivilDate& date, double lon_east_deg, std::optional<double> dut1_s) {
@@ -80,13 +95,43 @@ Transit transit_impl(const Time& approx, double lon_east_deg, const SolverConfig
     return {current, g};
 }
 
+// Illinois (modified regula falsi) on a bracket with f(lo) >= 0 > f(hi), in
+// fractions of a day: keeps the bracket and converges superlinearly. Stops once
+// the bracket is below the time tolerance and returns its midpoint, or returns
+// a point where f is exactly 0.
+template <class F>
+double refine(F f, double lo, double f_lo, double hi, double f_hi, const SolverConfig& cfg) {
+    const double tol_days = cfg.time_tolerance_s / seconds_per_day;
+    double x = 0.5 * (lo + hi);
+    int side = 0;
+    for (int iter = 0; iter < cfg.max_iter && std::abs(hi - lo) > tol_days; ++iter) {
+        x = (lo * f_hi - hi * f_lo) / (f_hi - f_lo);
+        if (!((lo < x && x < hi) || (hi < x && x < lo))) x = 0.5 * (lo + hi);
+        const double fx = f(x);
+        if (fx == 0.0) return x;
+        if (fx > 0.0) {
+            lo = x;
+            f_lo = fx;
+            if (side == 1) f_hi *= 0.5;
+            side = 1;
+        } else {
+            hi = x;
+            f_hi = fx;
+            if (side == -1) f_lo *= 0.5;
+            side = -1;
+        }
+    }
+    return 0.5 * (lo + hi);
+}
+
+// alt_transit: apparent altitude of `point` at transit.
 std::optional<Time> crossing_impl(const Transit& tr, double alt_transit, const Observer& obs,
-                                  const Atmosphere& atm, double target_alt_deg, Direction dir,
+                                  const Atmosphere& atm, double target_alt_deg, Direction dir, Point point,
                                   const SolverConfig& cfg) {
     const auto base = tr.time.utc();
     // Instants on the transit day, as offsets from transit (keeps DUT1 handling).
     auto at = [&](double frac) { return tr.time.shifted(frac - base.frac); };
-    auto f = [&](double frac) { return altitude_deg(at(frac), obs, atm) - target_alt_deg; };
+    auto f = [&](double frac) { return point_altitude_from(geocentric(at(frac)), obs, atm, point) - target_alt_deg; };
 
     const double sgn = static_cast<int>(dir);
     double lo = base.frac, f_lo = alt_transit - target_alt_deg;   // f >= 0 side
@@ -94,11 +139,13 @@ std::optional<Time> crossing_impl(const Transit& tr, double alt_transit, const O
     double hi = 0.0, f_hi = 0.0;                                  // f < 0 side
     bool bracketed = false;
 
-    // 1. First guess from the hour angle where the geometric altitude reaches
-    //    the target, with refraction at the target folded in:
+    // 1. First guess from the hour angle where the geometric altitude of the
+    //    center reaches the target, with refraction at the target and, for the
+    //    upper limb, the semidiameter at transit folded in:
     //    cos H0 = (sin h0 - sin φ sin δ) / (cos φ cos δ)
     const double refr = sky::refraction(target_alt_deg, sky::at_elevation(atm, obs.elev_m)) - target_alt_deg;
-    const double h0 = (target_alt_deg - refr) * deg2rad;
+    const double limb = point == Point::UpperLimb ? semidiameter_from(tr.state) : 0.0;
+    const double h0 = (target_alt_deg - refr - limb) * deg2rad;
     const double phi = obs.lat_deg * deg2rad;
     const double dec = tr.state.sun.dec_deg * deg2rad;
     const double c = (std::sin(h0) - std::sin(phi) * std::sin(dec)) / (std::cos(phi) * std::cos(dec));
@@ -162,29 +209,20 @@ std::optional<Time> crossing_impl(const Transit& tr, double alt_transit, const O
         if (!bracketed) return std::nullopt;
     }
 
-    // 3. Illinois (modified regula falsi): keeps the bracket and converges
-    //    superlinearly. Stops once the bracket is below the time tolerance.
-    const double tol_days = cfg.time_tolerance_s / seconds_per_day;
-    double x = 0.5 * (lo + hi);
-    int side = 0;
-    for (int iter = 0; iter < cfg.max_iter && std::abs(hi - lo) > tol_days; ++iter) {
-        x = (lo * f_hi - hi * f_lo) / (f_hi - f_lo);
-        if (!((lo < x && x < hi) || (hi < x && x < lo))) x = 0.5 * (lo + hi);
-        const double fx = f(x);
-        if (fx == 0.0) return at(x);
-        if (fx > 0.0) {
-            lo = x;
-            f_lo = fx;
-            if (side == 1) f_hi *= 0.5;
-            side = 1;
-        } else {
-            hi = x;
-            f_hi = fx;
-            if (side == -1) f_lo *= 0.5;
-            side = -1;
-        }
-    }
-    return at(0.5 * (lo + hi));
+    return at(refine(f, lo, f_lo, hi, f_hi, cfg));
+}
+
+// The root of the upper limb condition inside [transit, edge], where `edge` is
+// 12 h before or after transit, the limb is below the horizon at transit and
+// above it at the edge. Near a pole the Sun's altitude barely depends on the
+// hour angle, so the day's maximum can fall at the edge of the window rather
+// than at transit.
+Time root_toward_edge(const Transit& tr, double alt_edge, double alt_transit, double edge_days,
+                      const Observer& obs, const Atmosphere& atm, const SolverConfig& cfg) {
+    const auto base = tr.time.utc();
+    auto at = [&](double frac) { return tr.time.shifted(frac - base.frac); };
+    auto f = [&](double frac) { return upper_limb_altitude_from(geocentric(at(frac)), obs, atm); };
+    return at(refine(f, base.frac + edge_days, alt_edge, base.frac, alt_transit, cfg));
 }
 
 }  // namespace
@@ -194,33 +232,66 @@ double altitude_deg(const Time& t, const Observer& obs, const Atmosphere& atm) {
 }
 
 Time transit(const Time& approx, double lon_east_deg, const SolverConfig& cfg) {
+    require_finite({0.0, lon_east_deg, 0.0});
     return transit_impl(approx, lon_east_deg, cfg).time;
 }
 
 std::optional<Time> crossing(const Time& transit_time, const Observer& obs, const Atmosphere& atm,
                              double target_alt_deg, Direction dir, const SolverConfig& cfg) {
+    require_finite(obs, target_alt_deg);
     const Geocentric g = geocentric(transit_time);
-    return crossing_impl({transit_time, g}, altitude_from(g, obs, atm), obs, atm, target_alt_deg, dir, cfg);
+    assert(std::abs(hour_angle_deg(g, obs.lon_deg)) < 0.01 && "events::crossing: the first argument must be a transit");
+    return crossing_impl({transit_time, g}, altitude_from(g, obs, atm), obs, atm, target_alt_deg, dir, Point::Center,
+                         cfg);
+}
+
+double upper_limb_altitude_deg(const Time& t, const Observer& obs, const Atmosphere& atm) {
+    return upper_limb_altitude_from(geocentric(t), obs, atm);
+}
+
+std::optional<Time> upper_limb_crossing(const Time& transit_time, const Observer& obs, const Atmosphere& atm,
+                                        double target_alt_deg, Direction dir, const SolverConfig& cfg) {
+    require_finite(obs, target_alt_deg);
+    const Geocentric g = geocentric(transit_time);
+    assert(std::abs(hour_angle_deg(g, obs.lon_deg)) < 0.01 &&
+           "events::upper_limb_crossing: the first argument must be a transit");
+    return crossing_impl({transit_time, g}, upper_limb_altitude_from(g, obs, atm), obs, atm, target_alt_deg, dir,
+                         Point::UpperLimb, cfg);
 }
 
 Day day(const CivilDate& date, const Observer& obs, const Atmosphere& atm, std::optional<double> dut1_s,
         const SolverConfig& cfg) {
+    require_finite(obs);
     const Transit tr = transit_impl(approx_noon(date, obs.lon_deg, dut1_s), obs.lon_deg, cfg);
 
-    // The upper limb touches the horizon when the center is one semidiameter
-    // (959.63" / R, taken at transit) below it.
-    const double limb = -sun::semidiameter_deg(tr.time.tt());
+    // Sunrise and sunset: the apparent altitude of the upper limb is 0.
+    // Classify from it at transit and at both lower culminations around it
+    // (approximated as 12 h before and after).
+    const double alt_noon = upper_limb_altitude_from(tr.state, obs, atm);
+    const double alt_before = upper_limb_altitude_deg(tr.time.shifted(-0.5), obs, atm);
+    const double alt_after = upper_limb_altitude_deg(tr.time.shifted(0.5), obs, atm);
 
-    // Classify from the altitude at transit and at both lower culminations
-    // around it (approximated as 12 h before and after).
-    const double alt_noon = altitude_from(tr.state, obs, atm);
-    if (alt_noon < limb) return {date, DayType::PolarNight, tr.time, {}, {}, 0.0};
-    const double alt_before = altitude_deg(tr.time.shifted(-0.5), obs, atm);
-    const double alt_after = altitude_deg(tr.time.shifted(0.5), obs, atm);
-    if (alt_before > limb && alt_after > limb) return {date, DayType::PolarDay, tr.time, {}, {}, 24.0};
+    if (alt_noon < 0.0) {
+        // Below at transit. Normally polar night, unless the limb is above the
+        // horizon at an edge of the window, which happens within about 0.1° of
+        // a pole around an equinox: the Sun set before transit, or rises after it.
+        if (alt_before <= 0.0 && alt_after <= 0.0) return {date, DayType::PolarNight, tr.time, {}, {}, 0.0};
+        std::optional<Time> set, rise;
+        double hours = 0.0;
+        if (alt_before > 0.0) {
+            set = root_toward_edge(tr, alt_before, alt_noon, -0.5, obs, atm, cfg);
+            hours += duration_hours(tr.time, std::nullopt, set);
+        }
+        if (alt_after > 0.0) {
+            rise = root_toward_edge(tr, alt_after, alt_noon, 0.5, obs, atm, cfg);
+            hours += duration_hours(tr.time, rise, std::nullopt);
+        }
+        return {date, DayType::Normal, tr.time, rise, set, hours};
+    }
+    if (alt_before > 0.0 && alt_after > 0.0) return {date, DayType::PolarDay, tr.time, {}, {}, 24.0};
 
-    auto rise = crossing_impl(tr, alt_noon, obs, atm, limb, Direction::Before, cfg);
-    auto set = crossing_impl(tr, alt_noon, obs, atm, limb, Direction::After, cfg);
+    auto rise = crossing_impl(tr, alt_noon, obs, atm, 0.0, Direction::Before, Point::UpperLimb, cfg);
+    auto set = crossing_impl(tr, alt_noon, obs, atm, 0.0, Direction::After, Point::UpperLimb, cfg);
     return {date, DayType::Normal, tr.time, rise, set, duration_hours(tr.time, rise, set)};
 }
 

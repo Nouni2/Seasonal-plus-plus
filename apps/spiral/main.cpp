@@ -79,7 +79,7 @@ void print_summary(const char* name, const std::vector<Sample>& s, const YearDat
     }
     const auto [lo, hi] = std::minmax_element(s.begin(), s.end(),
                                               [](const Sample& a, const Sample& b) { return a.az_deg < b.az_deg; });
-    auto iso = [](const spp::CivilDate& d) { return std::format("{:04d}-{:02d}-{:02d}", d.year, d.month, d.day); };
+    auto iso = [](const spp::CivilDate& d) { return spp::iso_date(d); };
     std::println("{}: {} days, azimuth {:.2f} deg ({}) to {:.2f} deg ({})", name, s.size(), lo->az_deg,
                  iso(lo->date), hi->az_deg, iso(hi->date));
     if (static_cast<int>(s.size()) < data.days)

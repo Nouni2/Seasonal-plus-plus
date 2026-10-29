@@ -191,6 +191,14 @@ std::string season_color(int doy, int days) {
 // 1. Daylight and twilight across the year
 // ---------------------------------------------------------------------------
 
+// Hours (UTC, from the date's midnight) from sunrise to sunset on the day of `d`.
+// Spans the whole day on polar day; empty on polar night.
+std::pair<double, double> daylight(const spp::events::Day& d, const spp::Time& midnight) {
+    const double tr = hours_since(d.transit, midnight);
+    if (d.type == spp::events::DayType::PolarNight) return {tr, tr};
+    return {d.rise ? hours_since(*d.rise, midnight) : tr - 12.0, d.set ? hours_since(*d.set, midnight) : tr + 12.0};
+}
+
 // Hours (UTC, from the date's midnight) between which the Sun's center is above
 // `target` on the day of `d`. Spans the whole day when it never sets below it.
 std::pair<double, double> above(const spp::events::Day& d, const spp::Time& midnight, double target) {
@@ -206,8 +214,10 @@ void render_daylight(const std::filesystem::path& dir) {
     const Year y = year_dates(kYear);
     const int days = static_cast<int>(y.dates.size());
 
+    // Twilights are center altitudes; daylight runs from sunrise to sunset
+    // (refracted upper limb at 0), as events::day solves them.
     struct Level {
-        double target;
+        std::optional<double> target;
         const char* color;
         const char* name;
     };
@@ -215,7 +225,7 @@ void render_daylight(const std::filesystem::path& dir) {
         {spp::events::astronomical_twilight_deg, "#23406e", "Astronomical twilight"},
         {spp::events::nautical_twilight_deg, "#3a6aa6", "Nautical twilight"},
         {spp::events::civil_twilight_deg, "#79a7d9", "Civil twilight"},
-        {spp::events::upper_limb_deg, "#fbd97a", "Daylight"},
+        {std::nullopt, "#fbd97a", "Daylight"},
     }};
 
     std::array<Points, 4> dawn, dusk;
@@ -226,7 +236,7 @@ void render_daylight(const std::filesystem::path& dir) {
         const auto d = spp::events::day(date, kParis);
         noon.push_back({i + 1.0, hours_since(d.transit, midnight)});
         for (std::size_t l = 0; l < levels.size(); ++l) {
-            const auto [a, b] = above(d, midnight, levels[l].target);
+            const auto [a, b] = levels[l].target ? above(d, midnight, *levels[l].target) : daylight(d, midnight);
             dawn[l].push_back({i + 1.0, a});
             dusk[l].push_back({i + 1.0, b});
         }

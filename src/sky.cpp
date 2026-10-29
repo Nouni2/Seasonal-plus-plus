@@ -9,6 +9,18 @@
 
 namespace spp::sky {
 
+namespace {
+
+// Wraps an angle in (-2π, 4π) to [0, 2π). A tiny negative angle rounds to 2π
+// when 2π is added, and is returned as 0.
+double wrap_two_pi(double rad) {
+    if (rad < 0.0) rad += two_pi;
+    else if (rad >= two_pi) rad -= two_pi;
+    return rad >= two_pi ? 0.0 : rad;
+}
+
+}  // namespace
+
 Equatorial to_equatorial(const Ecliptic& ecl, double true_obliquity_deg) {
     const double eps_rad = true_obliquity_deg * deg2rad;
     const double lon_rad = ecl.lon_deg * deg2rad;
@@ -27,8 +39,7 @@ Equatorial to_equatorial(const Ecliptic& ecl, double true_obliquity_deg) {
 
     // tan α = (sin λ cos ε - tan β sin ε) / cos λ
     const double y = (sin_lon * cos_eps) - (std::tan(lat_rad) * sin_eps);
-    double alpha_rad = std::atan2(y, cos_lon);
-    if (alpha_rad < 0.0) alpha_rad += two_pi;
+    const double alpha_rad = wrap_two_pi(std::atan2(y, cos_lon));
 
     return {alpha_rad * rad2deg, delta_rad * rad2deg, ecl.dist_au};
 }
@@ -52,8 +63,7 @@ Horizontal to_horizontal(const Equatorial& eq, double lat_deg, double lst_deg) {
     // Azimuth from North, increasing East.
     const double y = -cos_dec * sin_h;
     const double x = (sin_dec * cos_lat) - (cos_dec * cos_h * sin_lat);
-    double az_rad = std::atan2(y, x);
-    if (az_rad < 0.0) az_rad += two_pi;
+    const double az_rad = wrap_two_pi(std::atan2(y, x));
 
     return {alt_rad * rad2deg, az_rad * rad2deg};
 }
@@ -100,9 +110,7 @@ Equatorial parallax(const Equatorial& geocentric, const Observer& obs, double ls
     const double num_dec = (sin_dec - rho_sin_phi * sin_pi) * std::cos(delta_alpha_rad);
     const double dec_topo_rad = std::atan2(num_dec, denominator);
 
-    double ra_topo_rad = ra_rad + delta_alpha_rad;
-    if (ra_topo_rad < 0.0) ra_topo_rad += two_pi;
-    else if (ra_topo_rad >= two_pi) ra_topo_rad -= two_pi;
+    const double ra_topo_rad = wrap_two_pi(ra_rad + delta_alpha_rad);
 
     return {ra_topo_rad * rad2deg, dec_topo_rad * rad2deg, geocentric.dist_au};
 }

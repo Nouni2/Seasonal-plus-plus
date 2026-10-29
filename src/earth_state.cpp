@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 
+#include "core/split.hpp"
 #include "spp/core/constants.hpp"
 #include "spp/model/iau1980.hpp"
 #include "spp/model/vsop87d.hpp"
@@ -22,7 +23,9 @@ namespace {
 // Segments are kSegmentDays long, aligned on J2000.0 (a TT noon), and each
 // holds a degree-kDegree Chebyshev series per quantity. The series fits the
 // residual from an offset (the value at the middle node): VSOP longitude
-// reaches ~2e4 rad, and fitting it directly would lose ~10 bits to rounding.
+// reaches ~2e4 rad, and fitting it directly puts that magnitude's rounding into
+// every coefficient. tools/cache_check.cpp measures the effect: without the
+// offset the worst error in L grows 2.6x (1.4 bits).
 constexpr std::int64_t kSegmentDays = 16;
 constexpr int kDegree = 24;
 constexpr int kNodes = kDegree + 1;
@@ -118,6 +121,7 @@ thread_local Memo last;
 
 // The pipeline asks for the same instant twice (nutation, then the Sun).
 EarthState earth_state(Instant<TT> t) {
+    t = normalized(t);
     if (t.day != last.day || t.frac != last.frac) last = {t.day, t.frac, evaluate(t)};
     return last.state;
 }

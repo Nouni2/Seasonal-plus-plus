@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <stdexcept>
 
+#include "split.hpp"
 #include "spp/model/espenak_meeus.hpp"
 #include "spp/model/meeus.hpp"
 
@@ -34,21 +36,10 @@ constexpr double kTtMinusTai = 32.184;
 // Integer MJD of the UTC civil day containing the instant (day, frac).
 std::int64_t mjd_day(std::int64_t day, double frac) { return frac >= 0.5 ? day - 2400000 : day - 2400001; }
 
-// Brings frac into [0, 1), carrying whole days into day.
-void normalize(std::int64_t& day, double& frac) {
-    const double whole = std::floor(frac);
-    day += static_cast<std::int64_t>(whole);
-    frac -= whole;
-    if (frac >= 1.0) {   // e.g. -1e-17 + 1.0 rounds to 1.0
-        day += 1;
-        frac -= 1.0;
-    }
-}
-
 template <class Scale>
 Instant<Scale> offset(std::int64_t day, double frac, double seconds) {
     frac += seconds / seconds_per_day;
-    normalize(day, frac);
+    detail::normalize(day, frac);
     return {day, frac};
 }
 
@@ -70,14 +61,19 @@ std::optional<double> tai_minus_utc_at(std::int64_t day, double frac) {
 
 // DUT1 when none is supplied. Where TT - UTC is exact, UT1 - UTC follows from
 // the ΔT model; it is clamped to the ±0.9 s that the leap-second system
-// maintains. After the table, the last value is held, which keeps TT
-// continuous; before 1972, UTC is taken as UT1.
+// maintains. Before 1972, UTC is taken as UT1.
+//
+// After the table, the value at the end of the table is held: the last exact
+// TT - UTC minus ΔT at the boundary instant (0h UTC on
+// kLeapSecondsValidUntilMjd). TT - UTC = DUT1 + ΔT then equals the exact value
+// at the boundary, so TT is continuous there.
 double estimated_dut1(std::int64_t day, double frac) {
     const std::int64_t mjd = mjd_day(day, frac);
     if (mjd < kLeapSeconds[0].mjd) return 0.0;
     if (mjd >= kLeapSecondsValidUntilMjd) {
-        day = kLeapSecondsValidUntilMjd + 2400000 - 1;   // noon of the last day covered
-        frac = 0.0;
+        const std::int64_t boundary_day = kLeapSecondsValidUntilMjd + 2400000;   // JD day; frac 0.5 is 0h UTC
+        const double last_tt_minus_utc = kTtMinusTai + *tai_minus_utc_at(boundary_day, 0.0);   // previous noon
+        return std::clamp(last_tt_minus_utc - delta_t_model(boundary_day, 0.5), -0.9, 0.9);
     }
     const double tt_minus_utc = kTtMinusTai + *tai_minus_utc_at(day, frac);
     return std::clamp(tt_minus_utc - delta_t_model(day, frac), -0.9, 0.9);
@@ -107,17 +103,32 @@ double floor_mod(double x, double y) {
 
 }  // namespace
 
-std::optional<double> tai_minus_utc(Instant<UTC> t) { return tai_minus_utc_at(t.day, t.frac); }
+std::string iso_date(const CivilDate& d) {
+    if (d.year < 0 || d.year > 9999) return std::format("{:+05d}-{:02d}-{:02d}", d.year, d.month, d.day);
+    return std::format("{:04d}-{:02d}-{:02d}", d.year, d.month, d.day);
+}
+
+std::optional<double> tai_minus_utc(Instant<UTC> t) {
+    const auto n = detail::normalized(t);
+    return tai_minus_utc_at(n.day, n.frac);
+}
 
 Time::Time(std::int64_t day, double frac, std::optional<double> dut1_s)
     : day_(day), frac_(frac), dut1_s_(0.0), dut1_given_(dut1_s.has_value()) {
-    normalize(day_, frac_);
+    // 2^52 days, about 1.2e13 years: beyond it a double no longer resolves a day.
+    if (!(std::fabs(frac) < 0x1p52)) throw std::invalid_argument("spp::Time: day fraction is not finite or too large");
+    if (day > (std::int64_t{1} << 62) || day < -(std::int64_t{1} << 62))
+        throw std::invalid_argument("spp::Time: Julian day out of range");
+    if (dut1_s && !std::isfinite(*dut1_s)) throw std::invalid_argument("spp::Time: DUT1 is not finite");
+    detail::normalize(day_, frac_);
     dut1_s_ = dut1_s ? *dut1_s : estimated_dut1(day_, frac_);
 }
 
 Time Time::from_jd(std::int64_t day, double frac, std::optional<double> dut1_s) { return Time(day, frac, dut1_s); }
 
 Time Time::from_civil(const CivilDateTime& utc, std::optional<double> dut1_s) {
+    if (!is_valid(utc.date())) throw std::invalid_argument("spp::Time: no such date: " + iso_date(utc.date()));
+    if (!std::isfinite(utc.second)) throw std::invalid_argument("spp::Time: seconds are not finite");
     const auto jd = model::meeus::jd_from_civil(utc);
     return Time(jd.day, jd.frac, dut1_s);
 }
@@ -146,6 +157,7 @@ double Time::decimal_year() const { return decimal_year_of(day_, frac_); }
 double Time::delta_t() const { return tt_minus_utc() - dut1_s_; }
 
 Time Time::shifted(double days) const {
+    if (!(std::fabs(days) < 0x1p52)) throw std::invalid_argument("spp::Time::shifted: days not finite or too large");
     // Whole days go to the integer part, so large shifts keep full precision.
     const double whole = std::floor(days);
     return Time(day_ + static_cast<std::int64_t>(whole), frac_ + (days - whole),
@@ -165,11 +177,11 @@ std::string Time::iso_utc() const {
     // Round at the JD level so 23:59:59.7 correctly rolls over the date.
     std::int64_t day = day_;
     double frac = frac_ + 0.5 / seconds_per_day;
-    normalize(day, frac);
+    detail::normalize(day, frac);
     const auto c = model::meeus::calendar_from_jd(day, frac);
     const auto total = static_cast<int>(c.day_fraction * seconds_per_day);
-    return std::format("{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}Z",
-                       c.year, c.month, c.day, total / 3600, (total % 3600) / 60, total % 60);
+    return std::format("{}T{:02d}:{:02d}:{:02d}Z", iso_date({c.year, c.month, c.day}), total / 3600,
+                       (total % 3600) / 60, total % 60);
 }
 
 }  // namespace spp

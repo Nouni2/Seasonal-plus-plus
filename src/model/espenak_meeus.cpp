@@ -1,46 +1,57 @@
 #include "spp/model/espenak_meeus.hpp"
 
-#include <array>
+#include <algorithm>
 #include <cmath>
-#include <cstddef>
+#include <iterator>
+
+#include "delta_t_observed.hpp"
 
 namespace spp::model::espenak_meeus {
 
 namespace {
 
-// Observed Delta T (TT - UT1) at the start of each year, seconds (IERS / USNO).
-// 2026: 69.184 s - (UT1 - UTC), with UT1 - UTC = +0.07 s from IERS Bulletin A
-// (January 2026).
-constexpr int kTableStartYear = 2005;
-constexpr std::array kObserved = {
-    64.69, 64.85, 65.15, 65.46, 65.78,   // 2005-2009
-    66.07, 66.32, 66.60, 66.91, 67.28,   // 2010-2014
-    67.64, 68.10, 68.59, 68.97, 69.22,   // 2015-2019
-    69.36, 69.36, 69.29, 69.18, 69.10,   // 2020-2024
-    69.07, 69.11,                        // 2025, 2026
-};
-constexpr int kTableEndYear = kTableStartYear + static_cast<int>(kObserved.size()) - 1;
+using detail::kObservedDeltaT;
+
+constexpr int kTableFirstMjd = kObservedDeltaT[0].mjd;
+constexpr int kTableLastMjd = std::end(kObservedDeltaT)[-1].mjd;
+
+// Decimal year y = 2000 + (JD - 2451545) / 365.25 and MJD = JD - 2400000.5.
+constexpr double kMjdJ2000 = 51544.5;
+constexpr double mjd_of(double y) { return kMjdJ2000 + (y - 2000.0) * 365.25; }
+constexpr double year_of(double mjd) { return 2000.0 + (mjd - kMjdJ2000) / 365.25; }
+
+constexpr double kTableFirstYear = year_of(kTableFirstMjd);
+constexpr double kTableLastYear = year_of(kTableLastMjd);
+
+// Linear interpolation of the monthly table. The year -> MJD conversion can
+// round just outside the table at its ends; the end intervals then extrapolate
+// by that rounding amount.
+double observed(double mjd) {
+    const auto* first = std::begin(kObservedDeltaT);
+    const auto* last = std::end(kObservedDeltaT) - 1;
+    const auto* hi = std::upper_bound(first, last + 1, mjd,
+                                      [](double m, const detail::ObservedDeltaT& e) { return m < e.mjd; });
+    hi = std::clamp(hi, first + 1, last);
+    const auto* lo = hi - 1;
+    const double frac = (mjd - lo->mjd) / static_cast<double>(hi->mjd - lo->mjd);
+    return lo->seconds + frac * (hi->seconds - lo->seconds);
+}
 
 double p(double x, double n) { return std::pow(x, n); }
 
 }  // namespace
 
 double delta_t_seconds(double y) {
-    // Observed era: linear interpolation of the annual values (< ~0.2 s error).
-    if (kTableStartYear <= y && y < kTableEndYear) {
-        const auto idx = static_cast<std::size_t>(y - kTableStartYear);
-        const double frac = (y - kTableStartYear) - static_cast<double>(idx);
-        const double v0 = kObserved[idx];
-        const double v1 = kObserved[idx + 1];
-        return v0 + frac * (v1 - v0);
-    }
+    // Observed era: monthly IERS values, interpolated linearly. The month
+    // after the last entry is not covered: the bridge below starts there.
+    if (kTableFirstYear <= y && y < kTableLastYear) return observed(mjd_of(y));
 
-    // Near future: from the last observation with zero slope (observed ΔT has
-    // been flat since 2021), curving up to the Espenak-Meeus 93 s at 2050 so the
-    // next piece stays continuous. A prediction: the uncertainty grows with time.
-    if (kTableEndYear <= y && y < 2050) {
-        const double last = kObserved.back();
-        const double u = (y - kTableEndYear) / (2050.0 - kTableEndYear);
+    // Near future: from the last observation with zero slope, curving up to
+    // the Espenak-Meeus 93 s at 2050 so the next piece stays continuous. A
+    // prediction: the uncertainty grows with time.
+    if (kTableLastYear <= y && y < 2050) {
+        const double last = std::end(kObservedDeltaT)[-1].seconds;
+        const double u = (y - kTableLastYear) / (2050.0 - kTableLastYear);
         return last + (93.0 - last) * u * u;
     }
 
@@ -50,14 +61,8 @@ double delta_t_seconds(double y) {
         return -20 + 32 * t * t - 0.5628 * (2150.0 - y);
     }
 
-    if (1986 <= y && y < 2005) {
-        const double t = y - 2000.0;
-        return 63.86 + 0.3345 * t - 0.060374 * t * t + 0.0017275 * p(t, 3) + 0.000651814 * p(t, 4)
-               + 0.00002373599 * p(t, 5);
-    }
-
     // Historical records (Espenak & Meeus fits)
-    if (1961 <= y && y < 1986) {
+    if (1961 <= y && y < kTableFirstYear) {
         const double t = y - 1975.0;
         return 45.45 + 1.067 * t - p(t, 2) / 260.0 - p(t, 3) / 718.0;
     }
@@ -93,7 +98,8 @@ double delta_t_seconds(double y) {
         return 120.0 - 0.9808 * t - 0.01532 * p(t, 2) + p(t, 3) / 7129.0;
     }
 
-    // Pre-telescopic (continuous at 1600, 500 and -500)
+    // Pre-telescopic. The published pieces do not join exactly: ΔT jumps by up
+    // to 0.25 s at the piece boundaries (README §2.6, tools/reference_check.py).
     if (500 <= y && y < 1600) {
         const double u = (y - 1000.0) / 100.0;
         return 1574.2 - 556.01 * u + 71.23472 * p(u, 2) + 0.319781 * p(u, 3) - 0.8503463 * p(u, 4)
