@@ -17,6 +17,7 @@ option(SPP_BUILD_VALIDATION "Build the spp_cache_check accuracy tool"           
 option(SPP_BUILD_BENCH      "Build the spp_bench benchmark"                              OFF)
 option(SPP_BUILD_FIGURES    "Build spp_figures, which renders the README figures"        OFF)
 option(SPP_INSTALL          "Generate install rules and the CMake package"               ${PROJECT_IS_TOP_LEVEL})
+option(SPP_BUILD_CAPI       "Build spp_capi, the C interface as a shared library (spp.dll / spp_capi.so)" OFF)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -184,6 +185,72 @@ endif()
 if(SPP_BUILD_FIGURES)
     spp_add_executable(spp_figures tools/figures.cpp)
     target_include_directories(spp_figures PRIVATE ${PROJECT_SOURCE_DIR}/apps/common)
+endif()
+
+# ------------------------------------------------------------------------------
+# C interface: include/spp/spp_c.h, built as a shared library that contains the
+# whole engine (spp is linked in statically) and exports only the spp_c_* and
+# spp_* functions of the header.
+# ------------------------------------------------------------------------------
+if(SPP_BUILD_CAPI)
+    # The static library is linked into a shared one.
+    set_target_properties(spp PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+    # Version string: project version + source revision ("-dirty" with uncommitted changes).
+    set(SPP_SOURCE_REVISION "unknown")
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+        execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short=7 HEAD
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} RESULT_VARIABLE git_result
+            OUTPUT_VARIABLE git_revision OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        if(git_result EQUAL 0)
+            set(SPP_SOURCE_REVISION ${git_revision})
+            execute_process(COMMAND ${GIT_EXECUTABLE} status --porcelain --untracked-files=no
+                WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} OUTPUT_VARIABLE git_changes ERROR_QUIET)
+            if(NOT git_changes STREQUAL "")
+                string(APPEND SPP_SOURCE_REVISION "-dirty")
+            endif()
+        endif()
+    endif()
+
+    add_library(spp_capi SHARED capi/spp_c.cpp)
+    target_link_libraries(spp_capi PRIVATE spp::spp)
+    target_include_directories(spp_capi PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>)
+    target_compile_definitions(spp_capi PRIVATE SPP_C_BUILD
+        SPP_C_VERSION_STRING="${PROJECT_VERSION}+${SPP_SOURCE_REVISION}")
+    # spp.dll on Windows; spp_capi.so elsewhere (no MinGW "lib" prefix).
+    set_target_properties(spp_capi PROPERTIES PREFIX "" RUNTIME_OUTPUT_NAME spp CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+    spp_apply_flags(spp_capi)
+
+    if(MINGW)
+        # Link libgcc, libstdc++ and winpthread into the DLL, so it depends only
+        # on Windows system DLLs (KERNEL32, the UCRT).
+        target_link_options(spp_capi PRIVATE -static)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT APPLE)
+        # Keep the symbols of the static library out of the export table.
+        target_link_options(spp_capi PRIVATE -Wl,--exclude-libs,ALL)
+    endif()
+    if(MSVC)
+        # The C runtime linked in statically, for the same reason.
+        set_target_properties(spp spp_capi PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    endif()
+
+    # A C program that checks the interface: layout, error codes, reference
+    # results and the event definitions. Prints PASS or FAIL, exits with 0 or 1.
+    enable_language(C)
+    add_executable(spp_capi_test capi/spp_capi_test.c)
+    set_target_properties(spp_capi_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    target_link_libraries(spp_capi_test PRIVATE spp_capi)
+    if(MINGW)
+        target_link_options(spp_capi_test PRIVATE -static-libgcc)
+    endif()
+
+    if(SPP_INSTALL)
+        install(TARGETS spp_capi
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+    endif()
 endif()
 
 # ------------------------------------------------------------------------------

@@ -2,8 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **Ratified** | 2026-09-30, with Spp 1.0.0 |
+| **Amended** | 1.1: the C interface (Articles IV and VI) |
 | **Applies to** | Everything in this repository: library, tools, executables, build, documentation and wiki |
 
 ## Preamble
@@ -69,11 +70,14 @@ source.
 1. Everything Spp can compute is available through its C++ API (`include/spp/`).
 2. The `spp` executable and the other tools are **thin front ends**: they parse input, call the API and
    print. They contain no astronomy of their own.
+3. The C interface (`include/spp/spp_c.h`, `capi/`) is a thin front end too: it converts types,
+   validates input and calls the C++ API. It contains no astronomy of its own, and exposes no result
+   the C++ API does not.
 3. What an executable does not print says nothing about what the engine can compute. A missing output
    is solved with a program that uses the library, never by moving computation into a tool.
 
 **Reason.** One implementation, reachable from everywhere, cannot drift from itself.
-**Check.** No file under `apps/` or `tools/` implements a model, a transform or a solver. The one
+**Check.** No file under `apps/`, `tools/` or `capi/` implements a model, a transform or a solver. The one
 exception is validation: a checking tool (such as `spp_cache_check`) may re-evaluate a model
 independently, in higher precision, to verify the engine.
 
@@ -93,9 +97,13 @@ independently, in higher precision, to verify the engine.
 2. Instants are stored as a **split Julian Date** (integer day + fraction), so precision does not depend
    on the date.
 3. UTC is the scale of input and output; UT1 drives the Earth's rotation; TT drives the ephemeris.
+4. The C interface cannot carry C++ types. There, instants are **UTC only**, as integer milliseconds
+   since 1970-01-01T00:00Z, and every parameter and field that holds one names its scale and unit
+   (`*_utc_ms`). They are converted to and from `Time` at the boundary and nowhere else.
 
 **Reason.** A 69-second scale confusion is the easiest large error to make and the hardest to see.
-**Check.** New APIs that take instants take `Instant<Scale>` or `Time`, never a bare `double`.
+**Check.** New C++ APIs that take instants take `Instant<Scale>` or `Time`, never a bare `double`. In
+the C interface, every instant is an `int64_t` named `*_utc_ms`, and no other scale appears.
 
 ## Article VII — Standalone
 

@@ -64,6 +64,7 @@ duration  16.1820 h
 - [Command-line tool](#command-line-tool) (a demonstration front end, not the engine)
 - [Azimuth spirals](#azimuth-spirals)
 - [Library](#library)
+- [C interface](#c-interface) (shared library, Windows DLL)
 - [Conventions](#conventions)
 - [Theory](#theory)
   1. [Pipeline](#1-pipeline)
@@ -213,6 +214,7 @@ CMake options:
 | `SPP_BUILD_BENCH` | `OFF` | Builds the `spp_bench` benchmark |
 | `SPP_BUILD_FIGURES` | `OFF` | Builds `spp_figures`, which renders the README figures |
 | `SPP_INSTALL` | top level | Generates the install rules and the CMake package |
+| `SPP_BUILD_CAPI` | `OFF` | Builds `spp_capi`, the [C interface](#c-interface) as a shared library, and `spp_capi_test` |
 
 "Top level" means `ON` when Spp is built on its own and `OFF` when it is
 included by another project, which then gets only the library.
@@ -601,6 +603,84 @@ cache.
 They are not reentrant in the strict sense: the cache is hidden mutable
 state, and its first use on a thread can allocate (where thread-local storage
 is emulated). Do not call Spp from a signal handler.
+
+---
+
+## C interface
+
+`include/spp/spp_c.h` is a C interface to the engine, for programs in other
+languages (C, C#, Python, …). It is built, with `-DSPP_BUILD_CAPI=ON`, as a
+shared library that contains the whole engine and exports only the functions
+of the header: `spp.dll` on Windows, `spp_capi.so` elsewhere. It is a thin
+front end: `capi/spp_c.cpp` converts types, validates input and calls the C++
+API above, and computes no astronomy of its own.
+
+**Contract.**
+
+- No C++ type crosses the interface and no exception escapes it. Every
+  function returns an `int32_t` status: `SPP_OK`, `SPP_E_ARGUMENT` (null
+  pointer, wrong `struct_size`, a date that does not exist, a non-finite or
+  out-of-range value), `SPP_E_RANGE` (outside the years −1000 to 3000) or
+  `SPP_E_INTERNAL`.
+- Instants are UTC Unix milliseconds (`int64_t`, days of 86,400 s as in Spp's
+  UTC), rounded to the nearest millisecond. Every name carries the scale:
+  `*_utc_ms`.
+- Fixed physical assumptions: the observer on the WGS84 ellipsoid at the given
+  elevation, the standard atmosphere ([§12](#12-atmospheric-refraction)), DUT1
+  estimated ([§2.5](#25-time-scales)).
+- Layout: `spp_observer` is three `double`s (24 bytes); `spp_solar_day` is six
+  `int32_t`, five `int64_t` and a `double` (72 bytes), with no padding. The
+  caller sets `struct_size`; `spp_c_solar_day_size()` and
+  `spp_c_abi_version()` (`SPP_C_ABI_VERSION`, now 1) let a caller check the
+  library it loaded. `spp_c_library_version()` returns the Spp version and
+  source revision, e.g. `1.0.0+f609065`.
+- Thread-safe, like the library.
+
+| Function | Result |
+|---|---|
+| `spp_solar_day_utc(obs, y, m, d, &day)` | `events::day` for a UTC date, plus civil dawn and dusk (`events::crossing` at −6°): day type, transit, and sunrise, sunset, dawn and dusk each with a presence flag; the duration within the 24 h window ([§13.2](#132-one-day)) |
+| `spp_upper_limb_altitude(obs, utc_ms, &alt)` | `events::upper_limb_altitude_deg`: positive when the Sun is up, by the same definition as sunrise and sunset |
+| `spp_upper_limb_altitudes(obs, start_utc_ms, step_ms, count, alt[])` | The same at `count` evenly spaced instants (an hourly series in one call) |
+
+A day of type `SPP_DAY_NORMAL` can lack sunrise or sunset (next to polar day,
+and within about 0.1° of a pole, [§13.2](#132-one-day)), so callers read the
+presence flags, never a zero time. The day is Spp's 24 h window centered on
+transit, found from 12:00 − longitude/15 h UTC on the given UTC date: a program
+that works with local calendar dates picks, among the neighbouring UTC dates,
+the one whose transit falls on its local date.
+
+**Building on Windows** (MSYS2 UCRT64 shell, the toolchain of the presets):
+
+```sh
+pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake \
+                   mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-ntldd
+cmake --preset capi
+cmake --build --preset capi
+./build/capi/spp_capi_test.exe          # prints PASS
+ntldd -R build/capi/spp.dll        # only Windows system DLLs
+```
+
+With MinGW the DLL links libgcc, libstdc++ and winpthread statically, so it
+depends only on Windows system DLLs (`KERNEL32.dll` and the Universal C
+Runtime, `api-ms-win-crt-*.dll`, part of Windows 10 and later). `ntldd -R`
+must list nothing from the MSYS2 folders (`libstdc++-6.dll`,
+`libgcc_s_seh-1.dll`, `libwinpthread-1.dll`). With MSVC, the C runtime is linked
+statically instead. To ship it, take `spp.dll`, `include/spp/spp_c.h` and
+`LICENSE`, and record `spp_c_library_version()`: a `-dirty` suffix means the
+build had uncommitted changes. On Linux and macOS, `-DSPP_BUILD_CAPI=ON` builds
+`spp_capi.so` and the same test.
+
+**Test.** `spp_capi_test` is written in C, so it also checks that the header
+is valid C. It checks the layout and versions, every error status, 14 reference
+days (`capi/spp_capi_test_cases.inc`: Paris, Reykjavík, Tromsø at both
+solstices, a day next to polar day, Sydney, Kiritimati (UTC+14), Apia (UTC+13),
+Quito, both poles near an equinox, 500 BC and 2999 AD) to 1 ms, the definitions
+at every sunrise and sunset (upper limb at 0 within 10⁻⁵°, rising or setting),
+the order of the events, and the batch function against single calls. The
+reference days were computed on Linux x86-64 with GCC 14.2 and agree exactly
+with the C++ API; the 1 ms tolerance allows for another platform's math
+library moving a result across a millisecond boundary
+([Floating-point policy](#floating-point-policy)).
 
 ---
 
@@ -1894,8 +1974,13 @@ Seasonal++/
 │   ├── bench.cpp                 benchmark
 │   └── figures.cpp               renders the README figures (SVG)
 ├── docs/images/                  README figures
+├── capi/
+│   ├── spp_c.cpp                 the C interface (spp.dll / spp_capi.so)
+│   ├── spp_capi_test.c           its test, in C
+│   └── spp_capi_test_cases.inc   reference solar days for the test
 ├── include/spp/
 │   ├── spp.hpp                   umbrella header
+│   ├── spp_c.h                   C interface
 │   ├── core/                     Time, Instant, calendar, angles, constants, types
 │   ├── sun.hpp  earth.hpp  sky.hpp  events.hpp
 │   └── model/                    vsop87d, iau1980, laskar, meeus, espenak_meeus, saemundsson
@@ -1985,6 +2070,10 @@ the major version. `find_package(Spp 1.0)` accepts any 1.x release.
 ### 1.0.1 (unreleased)
 
 Correctness release. **Results change**; the existing API is unchanged.
+
+- **C interface** (new): `include/spp/spp_c.h` and the `spp_capi` shared
+  library (`-DSPP_BUILD_CAPI=ON`, preset `capi`), for use from other languages,
+  with its test `spp_capi_test` ([C interface](#c-interface)).
 
 - **Sunrise and sunset now solve the documented condition** (#1): the
   refracted upper limb at 0. 1.0.0 refracted the center and subtracted the
