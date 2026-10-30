@@ -99,7 +99,7 @@ double delta_t_seconds(double y) {
     }
 
     // Pre-telescopic. The published pieces do not join exactly: ΔT jumps by up
-    // to 0.25 s at the piece boundaries (README §2.6, tools/reference_check.py).
+    // to 0.25 s at the piece boundaries (wiki: Time and ΔT §2.6, tools/reference_check.py).
     if (500 <= y && y < 1600) {
         const double u = (y - 1000.0) / 100.0;
         return 1574.2 - 556.01 * u + 71.23472 * p(u, 2) + 0.319781 * p(u, 3) - 0.8503463 * p(u, 4)
