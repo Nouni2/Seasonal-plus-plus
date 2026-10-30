@@ -44,7 +44,6 @@ duration  16.1959 h
   - Sidereal time: **IAU 1982** GMST and GAST in split precision.
   - Earth orientation & ΔT: **IERS EOP 20 C04** (1972–2026 monthly table) and Espenak–Meeus polynomials.
   - Atmospheric refraction: Sæmundsson model with local elevation, temperature, and pressure scaling.
-- **Dependencies**: None. Relies exclusively on standard C++20. Tables are embedded as compile-time constants.
 - **Throughput**: ~0.5 µs per position on warm Chebyshev cache; event solutions converge to 1 µs.
 
 ---
