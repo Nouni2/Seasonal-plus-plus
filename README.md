@@ -27,9 +27,9 @@ Built for batch evaluation across dates and observer grids. Calculations are ver
 $ spp day 2026-06-21 48.8566 2.3522 35
 type      NORMAL
 transit   2026-06-21T11:52:24Z
-sunrise   2026-06-21T03:46:32Z
-sunset    2026-06-21T19:58:17Z
-duration  16.1959 h
+sunrise   2026-06-21T03:46:57Z
+sunset    2026-06-21T19:57:52Z
+duration  16.1820 h
 ```
 
 ---
@@ -93,7 +93,7 @@ int main() {
     };
 
     // Construct a UTC timestamp
-    const Time t = Time::from_civil(2026, 6, 21, 12, 0, 0.0);
+    const Time t = Time::from_utc(2026, 6, 21, 12, 0, 0.0);
 
     // 1. Topocentric solar coordinates (apparent position with atmospheric refraction)
     const Horizontal sky = sun::horizontal(t, obs);
@@ -117,11 +117,11 @@ int main() {
 ## Accuracy & Precision
 
 ### Floating-Point Policy
-Computations run in IEEE 754 binary64 (`double`). Compiler flags disable `-ffast-math` and FMA contraction (`-ffp-contract=off`) to maintain deterministic instruction order across architectures.
+Computations run in IEEE 754 binary64 (`double`). With GCC and Clang, Spp builds with `-fno-fast-math` and `-ffp-contract=off`, so the compiler never fuses `a*b+c` into an FMA. MSVC builds use `/fp:precise` (untested).
 
 ### Verification
-- **Solar Position**: Within ≤ 0.064″ topocentric altitude/azimuth against JPL DE421 (2000–2026).
-- **Nutation & Sidereal Time**: Matches ERFA / IAU SOFA to 0.0008 mas (IAU 1980) and 0.5 mas (IAU 1982 GMST).
+- **Solar Position**: Topocentric altitude and azimuth within 0.064″ of JPL DE421 at 8 sites, 78° S to 78° N (2000–2026).
+- **Nutation & Sidereal Time**: IAU 1980 nutation within 0.0008 mas of ERFA `nut80` and IAU 1982 GMST within 0.5 mas of ERFA `gmst82` (1900–2100).
 - **Solar Events**: Sunrise/sunset instants agree with DE421 geometry to ≤ 11 ms (latitudes 0°–64°) and ≤ 6.4 × 10⁻⁶″ of refracted upper limb altitude.
 - **Full Pipeline**: Verified against an 80-bit extended-precision evaluation (`tools/pipeline_check.cpp`).
 
@@ -129,13 +129,15 @@ Computations run in IEEE 754 binary64 (`double`). Compiler flags disable `-ffast
 
 ## Performance
 
-| Evaluation Type | Time per Evaluation | Notes |
+| Operation | Warm cache | Cold cache |
 |---|---|---|
-| **Warm Cache** | ~0.5 µs | Consecutive instants within the active Chebyshev interval |
-| **Cold Cache** | ~0.46 ms | Evaluating a random date requiring full VSOP87D series summation |
-| **Solar Day Events** | ~8–12 µs | Complete day classification, transit, sunrise, and sunset solution |
+| `sun::apparent` | 0.18 µs | |
+| `events::altitude_deg` (includes the apparent Sun) | 0.48 µs | 0.48 ms |
+| `events::day` (transit, rise, set) | 7.76 µs | 0.52 ms |
 
-*Benchmarked on AMD Ryzen / Linux GCC 14.2 Release. See `tools/bench.cpp`.*
+Warm: each query's 16-day Chebyshev segment is already filled (consecutive instants, or a year of days at 19 latitudes for `events::day`). Cold: random instants or dates over 1000 BC–3000 AD, timed on first use, so nearly every query fills a new segment.
+
+*Measured with `spp_bench` (`tools/bench.cpp`) on one thread: AMD Ryzen 7 7840HS, Windows 11 x86-64, GCC 15.2.0, `release` CMake preset.*
 
 ---
 
