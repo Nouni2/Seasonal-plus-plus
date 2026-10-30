@@ -218,14 +218,15 @@ if(SPP_BUILD_CAPI)
     target_include_directories(spp_capi PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>)
     target_compile_definitions(spp_capi PRIVATE SPP_C_BUILD
         SPP_C_VERSION_STRING="${PROJECT_VERSION}+${SPP_SOURCE_REVISION}")
-    # spp.dll on Windows; spp_capi.so elsewhere (no MinGW "lib" prefix).
+    # spp.dll on Windows, spp_capi.so on Linux, spp_capi.dylib on macOS (no "lib" prefix).
     set_target_properties(spp_capi PROPERTIES PREFIX "" RUNTIME_OUTPUT_NAME spp CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
     spp_apply_flags(spp_capi)
 
     if(MINGW)
         # Link libgcc, libstdc++ and winpthread into the DLL, so it depends only
-        # on Windows system DLLs (KERNEL32, the UCRT).
-        target_link_options(spp_capi PRIVATE -static)
+        # on Windows system DLLs (KERNEL32, the UCRT). Release builds strip the
+        # symbol table and debug sections.
+        target_link_options(spp_capi PRIVATE -static $<$<CONFIG:Release>:-s>)
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT APPLE)
         # Keep the symbols of the static library out of the export table.
         target_link_options(spp_capi PRIVATE -Wl,--exclude-libs,ALL)

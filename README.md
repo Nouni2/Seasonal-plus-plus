@@ -116,7 +116,7 @@ int main() {
 
 ## C Interface
 
-`include/spp/spp_c.h` exposes the engine to C and other languages (C#, Python, …) through a shared library: `spp.dll` on Windows, `spp_capi.so` elsewhere. `capi/spp_c.cpp` converts types, validates input and calls the C++ API; it computes no astronomy of its own.
+`include/spp/spp_c.h` exposes the engine to C and other languages (C#, Python, …) through a shared library: `spp.dll` on Windows, `spp_capi.so` on Linux. `capi/spp_c.cpp` converts types, validates input and calls the C++ API; it computes no astronomy of its own.
 
 ```bash
 cmake --preset capi
@@ -130,7 +130,7 @@ cmake --build --preset capi
 | `spp_upper_limb_altitude(obs, utc_ms, &alt)` | Refracted upper-limb altitude; positive when the Sun is up |
 | `spp_upper_limb_altitudes(obs, start_utc_ms, step_ms, count, alt[])` | The same at `count` evenly spaced instants |
 
-Every function returns an `int32_t` status (`SPP_OK`, `SPP_E_ARGUMENT`, `SPP_E_RANGE`, `SPP_E_INTERNAL`). Instants are UTC Unix milliseconds named `*_utc_ms`. `spp_c_abi_version()` returns `SPP_C_ABI_VERSION` (1), and `spp_c_library_version()` returns the Spp version and source revision. The [C Interface wiki page](http://github.com/Nouni2/Seasonal-plus-plus/wiki/C-Interface) documents the full contract, the Windows build and the test.
+Every function returns an `int32_t` status (`SPP_OK`, `SPP_E_ARGUMENT`, `SPP_E_RANGE`, `SPP_E_INTERNAL`). Instants are UTC Unix milliseconds, and every name that holds one ends in `utc_ms`. `spp_c_abi_version()` returns `SPP_C_ABI_VERSION` (1), and `spp_c_library_version()` returns the Spp version and source revision. The [C Interface wiki page](http://github.com/Nouni2/Seasonal-plus-plus/wiki/C-Interface) documents the full contract, the Windows build and the test.
 
 ---
 

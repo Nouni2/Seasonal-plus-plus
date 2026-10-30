@@ -1,6 +1,7 @@
 /*
  * spp_c.h — the C interface of Spp (Seasonal++), for use from other languages
- * through a shared library (spp.dll on Windows, spp_capi.so elsewhere).
+ * through a shared library (spp.dll on Windows, spp_capi.so on Linux,
+ * spp_capi.dylib on macOS).
  *
  * The interface carries no C++ types and lets no exception cross it. Every
  * function returns an int32_t status (SPP_OK or an SPP_E_* code) and writes
@@ -8,7 +9,7 @@
  *
  * Instants are UTC, as integer milliseconds since 1970-01-01T00:00:00Z (Unix
  * time: every day has 86,400 s, as in Spp's UTC). Results are rounded to the
- * nearest millisecond. The scale is part of every name (*_utc_ms). Supported
+ * nearest millisecond. Every name that holds one ends in utc_ms. Supported
  * years: -1000 to 3000 (astronomical numbering; Julian calendar before
  * 1582-10-15, Gregorian from then on).
  *
