@@ -18,7 +18,7 @@
  *     10 degrees C);
  *   - DUT1 = UT1 - UTC estimated by Spp from its observed Delta T table.
  *
- * Definitions are those of the Spp README (section 13.1): sunrise and sunset
+ * Definitions are those of the Spp wiki (Events, section 13.1): sunrise and sunset
  * are the instants the refracted upper limb of the Sun is at 0 degrees; civil
  * dawn and dusk the instants its center is at -6 degrees; transit the instant
  * its geocentric apparent hour angle is 0.
@@ -75,7 +75,7 @@ typedef struct spp_observer {
 } spp_observer;
 
 /* One solar day: the 24 hours centered on the transit that Spp finds from
- * 12:00 - longitude/15 h UTC on the given UTC date (README section 13.2).
+ * 12:00 - longitude/15 h UTC on the given UTC date (wiki: Events, section 13.2).
  * Events can fall on the UTC date before or after it.
  *
  * Each event has a presence flag (0 or 1); its time field is 0 when the flag

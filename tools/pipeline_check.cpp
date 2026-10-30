@@ -273,7 +273,7 @@ int main() {
     std::uniform_real_distribution<double> lat_dist(-89.0, 89.0), lon_dist(-180.0, 180.0), elev_dist(0.0, 3000.0);
     std::uniform_real_distribution<double> dut1_dist(-0.9, 0.9);
 
-    // Limits: about twice the rounding level measured for Spp 1.0.1 (README, Numerical error),
+    // Limits: about twice the rounding level measured for Spp 1.0.1 (wiki: Accuracy, Numerical precision),
     // so that any change that loses precision fails.
     Stat ra{"right ascension x cos(dec)", "arcsec", 2e-5}, dec{"declination", "arcsec", 2e-5};
     Stat alt{"altitude, refracted", "arcsec", 2e-5}, alt_g{"altitude, geometric", "arcsec", 2e-5};

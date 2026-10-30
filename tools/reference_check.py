@@ -1,8 +1,8 @@
-"""Correctness of Spp against independent references (Constitution, Article III).
+"""Correctness of Spp against independent references (CONTRIBUTING.md, Change Verification).
 
 Every check compares Spp, through spp_dump, with a reference that shares no code
 with it, and passes when the difference is within the documented model
-difference (README, Accuracy). The program prints one line per check and PASS
+difference (wiki: Accuracy, Error budget). The program prints one line per check and PASS
 or FAIL, writes every measurement to a JSON file, and exits with 0 or 1.
 
 References
