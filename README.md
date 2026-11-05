@@ -17,7 +17,7 @@
   Full VSOP87D ephemeris · strict IEEE 754 fp64 · ~0.5 µs per sky position (warm cache) · events solved to 1 µs
 </p>
 
-Spp is a C++20 library for solar positional astronomy: apparent geocentric coordinates, topocentric refracted altitude and azimuth, sidereal time, nutation, ΔT, and solar event instants from 1000 BC to 3000 AD.
+Spp is a C++20 library for solar and lunar positional astronomy: apparent geocentric coordinates, topocentric refracted altitude and azimuth, sidereal time, nutation, ΔT, solar event instants from 1000 BC to 3000 AD, and the Moon's position, phases, rise, set and libration.
 
 The library is the engine. All computation is exposed through `include/spp/`. The `spp` CLI front-end prints a subset of these results.
 
@@ -44,6 +44,12 @@ duration  16.1820 h
   - Sidereal time: **IAU 1982** GMST and GAST in split precision.
   - Earth orientation & ΔT: **IERS EOP 20 C04** (1972–2026 monthly table) and Espenak–Meeus polynomials.
   - Atmospheric refraction: Sæmundsson model with local elevation, temperature, and pressure scaling.
+- **Moon** (`SPP_BUILD_MOON`, on by default):
+  - Orbit: full **ELP/MPP02** (35,901 terms, DE405/DE406 or LLR fit), with a twenty-minute interpolation cache for observations and searches.
+  - Observation: topocentric altitude/azimuth with light time, aberration, parallax and refraction; illumination, bright-limb and parallactic angles.
+  - Events: principal phases; moonrise, moonset, upper/lower transits and grazing contacts.
+  - Orientation: IAU2009 pole and prime meridian, libration and sub-observer/subsolar coordinates.
+  - Optional numerical orbit propagated from a JPL SPK kernel (DE440s).
 - **Throughput**: ~0.5 µs per position on warm Chebyshev cache; event solutions converge to 1 µs.
 
 ---
@@ -64,6 +70,8 @@ Using presets (Ninja + GCC/UCRT64):
 cmake --preset release
 cmake --build --preset release
 ```
+
+Set `-DSPP_BUILD_MOON=OFF` for a solar-only build. The `moon` preset also builds the `spp_moon` OpenGL app (GLFW, GLEW, OpenGL) and the Moon validation tools.
 
 ### CMake Integration
 
@@ -144,6 +152,7 @@ Computations run in IEEE 754 binary64 (`double`). With GCC and Clang, Spp builds
 - **Nutation & Sidereal Time**: IAU 1980 nutation within 0.0008 mas of ERFA `nut80` and IAU 1982 GMST within 0.5 mas of ERFA `gmst82` (1900–2100).
 - **Solar Events**: Sunrise/sunset instants agree with DE421 geometry to ≤ 11 ms (latitudes 0°–64°) and ≤ 6.4 × 10⁻⁶″ of refracted upper limb altitude.
 - **Full Pipeline**: Verified against an 80-bit extended-precision evaluation (`tools/pipeline_check.cpp`).
+- **Moon** (sampled maxima, not global bounds): sky direction within 1.015″ of JPL Horizons DE441 (15 observer cases); illumination within 0.00001946 percentage points (20 cases); principal-phase times within 0.211 s of matched-TT DE441 arcs (62 events).
 
 ---
 
@@ -159,11 +168,13 @@ Warm: each query's 16-day Chebyshev segment is already filled (consecutive insta
 
 *Measured with `spp_bench` (`tools/bench.cpp`) on one thread: AMD Ryzen 7 7840HS, Windows 11 x86-64, GCC 15.2.0, `release` CMake preset.*
 
+Moon figures (resident cached coordinates ≈2.3–2.5 µs, direct full series ≈1 ms) are in [docs/moon.md](docs/moon.md#measured-performance-and-accuracy).
+
 ---
 
 ## Limitations
 
-- **Solar body only**: Computes solar coordinates and events. Lunar and planetary ephemerides are out of scope.
+- **Sun and Moon only**: Planetary ephemerides are out of scope. Moon limits (no eclipses, approximate IAU2009 orientation, reduced numerical force model, no lunar C interface) are in [docs/moon.md](docs/moon.md#current-limits).
 - **Platform `libm`**: While compiler code generation is deterministic, transcendental functions (`sin`, `cos`, `atan2`) depend on the host C runtime and may differ by the last ULP.
 - **Pre-1600 ΔT**: Historical ΔT uncertainty dominates timing precision prior to 1600 AD.
 
@@ -181,6 +192,7 @@ In-depth astronomical derivations, tutorials, and full API references are hosted
 - [Validation Tools & Audit Reproduction](http://github.com/Nouni2/Seasonal-plus-plus/wiki/Validation-Tools)
 - [Known Issues & Workarounds](http://github.com/Nouni2/Seasonal-plus-plus/wiki/Known-Issues)
 - [Roadmap](http://github.com/Nouni2/Seasonal-plus-plus/wiki/Roadmap)
+- [Moon support](docs/moon.md)
 
 ---
 
