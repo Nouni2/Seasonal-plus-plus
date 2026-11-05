@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include "spp/core/types.hpp"
 
 // The observer's sky: frame transforms and observer-specific corrections.
@@ -9,6 +11,11 @@ Equatorial to_equatorial(const Ecliptic& ecl, double true_obliquity_deg);
 
 // Geometric transform only: no parallax, no refraction.
 Horizontal to_horizontal(const Equatorial& eq, double lat_deg, double lst_deg);
+
+// WGS84 observer position relative to Earth's center, kilometres, in the
+// equatorial frame of the supplied local sidereal angle. Subtract this vector
+// from a geocentric position for exact finite-distance parallax.
+std::array<double, 3> observer_position_km(const Observer& obs, double lst_deg);
 
 // Geocentric -> topocentric equatorial (WGS84 observer position).
 Equatorial parallax(const Equatorial& geocentric, const Observer& obs, double lst_deg);

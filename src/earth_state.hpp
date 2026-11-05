@@ -8,6 +8,8 @@
 // thread. The fit error is kept at the level of double rounding in the direct
 // sums (tools/cache_check.cpp measures it).
 
+#include <cstddef>
+#include <cstdint>
 #include "spp/core/time.hpp"
 
 namespace spp::detail {
@@ -25,5 +27,13 @@ EarthState earth_state_direct(double T);
 
 // Cached Chebyshev evaluation.
 EarthState earth_state(Instant<TT> t);
+
+// Internal performance diagnostics. Per-thread, as is the cache itself.
+struct EarthCacheStats {
+    std::uint64_t hits, builds;
+    std::size_t capacity, bytes;
+};
+EarthCacheStats earth_cache_stats();
+void clear_earth_cache();
 
 }  // namespace spp::detail

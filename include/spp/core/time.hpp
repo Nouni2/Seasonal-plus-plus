@@ -14,6 +14,8 @@ namespace spp {
 struct UTC {};
 struct UT1 {};
 struct TT {};
+// Barycentric dynamical time, used by dynamical ephemerides.
+struct TDB {};
 
 // A Julian Date split into integer day + fraction to keep full precision
 // over millennia. frac is in [0, 1) and 0.0 is noon (JD convention).
@@ -53,6 +55,7 @@ public:
     Instant<UTC> utc() const;
     Instant<UT1> ut1() const;   // UTC + DUT1
     Instant<TT> tt() const;     // UTC + (TT - UTC); see tt_minus_utc()
+    Instant<TDB> tdb() const;   // TT + geocentric periodic TDB - TT approximation
 
     double tt_minus_utc() const;   // seconds: exact from leap seconds when known, else DUT1 + ΔT
     double delta_t() const;        // ΔT = TT - UT1, seconds
@@ -81,5 +84,10 @@ std::string iso_date(const CivilDate& d);
 // TAI - UTC in seconds at a UTC instant, from the IERS leap-second table, or
 // nullopt before 1972-01-01 and after the date up to which the table is known.
 std::optional<double> tai_minus_utc(Instant<UTC> t);
+
+// USNO Circular 179, eq. 2.6: geocentric TDB - TT, approximately 10 us
+// accuracy during 1600-2200. No observer-dependent (diurnal) term. Outside
+// this interval the formula is an extrapolation, not a precision guarantee.
+Instant<TDB> tdb_from_tt(Instant<TT> t);
 
 }  // namespace spp

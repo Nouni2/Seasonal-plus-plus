@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(Spp
-    VERSION 1.1.0
+    VERSION 1.2.0
     DESCRIPTION "High-precision solar positional astronomy library"
     LANGUAGES CXX
 )
@@ -12,12 +12,14 @@ project(Spp
 # Apps, tools and install rules default to ON only when Spp is the top-level
 # project, so add_subdirectory / FetchContent users get just the library.
 option(SPP_NATIVE           "Tune for the build machine (-march=native)"                 OFF)
-option(SPP_BUILD_APPS       "Build the spp command-line tool and the spp_spiral viewer"  ${PROJECT_IS_TOP_LEVEL})
+option(SPP_BUILD_APPS       "Build the CLI and available OpenGL viewers"                  ${PROJECT_IS_TOP_LEVEL})
 option(SPP_BUILD_VALIDATION "Build the spp_cache_check accuracy tool"                    ${PROJECT_IS_TOP_LEVEL})
 option(SPP_BUILD_BENCH      "Build the spp_bench benchmark"                              OFF)
 option(SPP_BUILD_FIGURES    "Build spp_figures, which renders the README figures"        OFF)
 option(SPP_INSTALL          "Generate install rules and the CMake package"               ${PROJECT_IS_TOP_LEVEL})
 option(SPP_BUILD_CAPI       "Build spp_capi, the C interface as a shared library (spp.dll / spp_capi.so)" OFF)
+option(SPP_BUILD_MOON       "Build the ELP/MPP02 lunar ephemeris, sky coordinates and phases" ON)
+set(SPP_MOON_REFERENCE_KERNEL "" CACHE FILEPATH "Optional existing DE440s SPK for numerical Moon performance/accuracy gates; never downloaded by CMake")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -80,6 +82,7 @@ add_custom_command(
 # ------------------------------------------------------------------------------
 add_library(spp STATIC
     src/core/calendar.cpp
+    src/core/frames.cpp
     src/core/time.cpp
     src/earth.cpp
     src/earth_state.cpp
@@ -92,6 +95,7 @@ add_library(spp STATIC
     src/model/laskar.cpp
     src/model/meeus.cpp
     src/model/saemundsson.cpp
+    src/model/spk.cpp
     src/model/vsop87d.cpp
     ${SPP_VSOP_INC}
 )
@@ -108,6 +112,47 @@ target_compile_features(spp PUBLIC cxx_std_20)
 # Debug and release archives can share one install prefix: libsppd.a / libspp.a.
 set_target_properties(spp PROPERTIES DEBUG_POSTFIX d)
 spp_apply_flags(spp)
+
+# ELP/MPP02 uses compiled, untruncated coefficient tables. A solar-only build
+# can omit the model, its generator and its data entirely.
+if(SPP_BUILD_MOON)
+    set(SPP_ELP_GEN_EXECUTABLE "" CACHE FILEPATH "Prebuilt host elp_gen for cross-compiling without an emulator")
+    if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+        if(SPP_ELP_GEN_EXECUTABLE)
+            set(SPP_ELP_GEN ${SPP_ELP_GEN_EXECUTABLE})
+        else()
+            set(SPP_ELP_GEN ${PROJECT_BINARY_DIR}/host/elp_gen${CMAKE_HOST_EXECUTABLE_SUFFIX})
+            add_custom_command(
+                OUTPUT ${SPP_ELP_GEN}
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_BINARY_DIR}/host
+                COMMAND ${SPP_HOST_CXX} -std=c++20 -O2 ${PROJECT_SOURCE_DIR}/tools/elp_gen.cpp -o ${SPP_ELP_GEN}
+                DEPENDS ${PROJECT_SOURCE_DIR}/tools/elp_gen.cpp
+                COMMENT "Building elp_gen for the host with ${SPP_HOST_CXX}"
+                VERBATIM
+            )
+        endif()
+        set(SPP_ELP_GEN_DEPENDS ${SPP_ELP_GEN})
+    else()
+        add_executable(elp_gen tools/elp_gen.cpp)
+        spp_apply_flags(elp_gen)
+        set(SPP_ELP_GEN elp_gen)
+        set(SPP_ELP_GEN_DEPENDS elp_gen)
+    endif()
+    file(GLOB SPP_ELP_DATA CONFIGURE_DEPENDS
+        ${PROJECT_SOURCE_DIR}/data/elp_mpp02/elp_main.*
+        ${PROJECT_SOURCE_DIR}/data/elp_mpp02/elp_pert.*)
+    set(SPP_ELP_INC ${SPP_GENERATED_DIR}/spp/elp_mpp02_terms.inc)
+    add_custom_command(
+        OUTPUT ${SPP_ELP_INC}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${SPP_GENERATED_DIR}/spp
+        COMMAND ${SPP_ELP_GEN} ${PROJECT_SOURCE_DIR}/data/elp_mpp02 ${SPP_ELP_INC}
+        DEPENDS ${SPP_ELP_GEN_DEPENDS} ${SPP_ELP_DATA}
+        COMMENT "Generating full ELP/MPP02 lunar tables"
+        VERBATIM
+    )
+    target_sources(spp PRIVATE src/moon.cpp src/moon_observe.cpp src/moon_events.cpp
+        src/model/elp_mpp02.cpp src/model/iau_moon.cpp src/model/lunar_numerical.cpp ${SPP_ELP_INC})
+endif()
 
 # ------------------------------------------------------------------------------
 # Executables
@@ -144,18 +189,46 @@ endfunction()
 if(SPP_BUILD_APPS)
     spp_add_executable(spp_cli apps/spp/main.cpp)
     set_target_properties(spp_cli PROPERTIES OUTPUT_NAME spp)
+    target_compile_definitions(spp_cli PRIVATE SPP_CLI_MOON=$<BOOL:${SPP_BUILD_MOON}>)
 
     # Sunrise/sunset azimuth spirals: built when GLFW, GLEW and GLM are available.
     find_package(glfw3 CONFIG QUIET)
-    find_package(glew CONFIG QUIET)
+    find_package(GLEW QUIET)
+    if(NOT TARGET GLEW::GLEW)
+        find_package(glew CONFIG QUIET)
+        if(TARGET GLEW::glew)
+            add_library(GLEW::GLEW ALIAS GLEW::glew)
+        endif()
+    endif()
     find_package(glm CONFIG QUIET)
     find_package(OpenGL QUIET)
-    if(TARGET glfw AND TARGET GLEW::glew AND TARGET glm::glm AND TARGET OpenGL::GL)
+    if(TARGET glfw AND TARGET GLEW::GLEW AND TARGET glm::glm AND TARGET OpenGL::GL)
         spp_add_executable(spp_spiral apps/spiral/main.cpp)
-        target_link_libraries(spp_spiral PRIVATE glfw GLEW::glew glm::glm OpenGL::GL)
+        target_link_libraries(spp_spiral PRIVATE glfw GLEW::GLEW glm::glm OpenGL::GL)
         target_include_directories(spp_spiral PRIVATE ${PROJECT_SOURCE_DIR}/apps/common)
     else()
         message(STATUS "spp_spiral not built: GLFW, GLEW, GLM or OpenGL not found")
+    endif()
+    if(SPP_BUILD_MOON AND TARGET glfw AND TARGET GLEW::GLEW AND TARGET OpenGL::GL)
+        find_package(Threads REQUIRED)
+        spp_add_executable(spp_moon apps/moon/main.cpp)
+        target_include_directories(spp_moon PRIVATE ${PROJECT_SOURCE_DIR}/apps/common)
+        target_link_libraries(spp_moon PRIVATE glfw GLEW::GLEW OpenGL::GL Threads::Threads)
+        if(SPP_INSTALL)
+            install(TARGETS spp_moon RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+            install(FILES data/licenses/DejaVu.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/Spp)
+        endif()
+        if(UNIX AND NOT APPLE)
+            find_package(OpenGL QUIET COMPONENTS EGL)
+        endif()
+        if(TARGET OpenGL::EGL)
+            target_link_libraries(spp_moon PRIVATE OpenGL::EGL)
+            target_compile_definitions(spp_moon PRIVATE SPP_MOON_EGL=1)
+        else()
+            target_compile_definitions(spp_moon PRIVATE SPP_MOON_EGL=0)
+        endif()
+    elseif(SPP_BUILD_MOON)
+        message(STATUS "spp_moon not built: GLFW, GLEW or OpenGL not found")
     endif()
 endif()
 
@@ -176,10 +249,83 @@ if(SPP_BUILD_VALIDATION)
 
     # Library side of tools/reference_check.py.
     spp_add_executable(spp_dump tools/spp_dump.cpp)
+
+    if(SPP_BUILD_MOON)
+        spp_add_executable(spp_lunar_check tools/lunar_check.cpp)
+        enable_testing()
+        add_test(NAME spp_lunar_reference COMMAND spp_lunar_check
+            ${PROJECT_SOURCE_DIR}/tools/reference/elp_mpp02_states.csv)
+        spp_add_executable(spp_moon_sky_check tools/moon_sky_check.cpp)
+        target_include_directories(spp_moon_sky_check PRIVATE ${PROJECT_SOURCE_DIR}/src)
+        add_test(NAME spp_moon_sky_reference COMMAND spp_moon_sky_check
+            ${PROJECT_SOURCE_DIR}/tools/reference/moon_horizons.csv
+            ${PROJECT_SOURCE_DIR}/tools/reference/moon_usno_phases.csv)
+        spp_add_executable(spp_lunar_cache_check tools/lunar_cache_check.cpp)
+        add_test(NAME spp_lunar_cache COMMAND spp_lunar_cache_check)
+    endif()
 endif()
 
 if(SPP_BUILD_BENCH)
+    spp_add_executable(spp_spk_bench tools/spk_bench.cpp)
+    target_include_directories(spp_spk_bench PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    spp_add_executable(spp_earth_cache_bench tools/earth_cache_bench.cpp)
+    target_include_directories(spp_earth_cache_bench PRIVATE ${PROJECT_SOURCE_DIR}/src)
     spp_add_executable(spp_bench tools/bench.cpp)
+    target_compile_definitions(spp_bench PRIVATE SPP_BENCH_MOON=$<BOOL:${SPP_BUILD_MOON}>
+        SPP_BENCH_CONFIG="$<CONFIG>")
+    if(SPP_BUILD_MOON AND SPP_BUILD_VALIDATION)
+        find_package(Threads REQUIRED)
+        spp_add_executable(spp_moon_worker_bench tools/moon_worker_bench.cpp)
+        target_include_directories(spp_moon_worker_bench PRIVATE ${PROJECT_SOURCE_DIR}/apps/common)
+        target_link_libraries(spp_moon_worker_bench PRIVATE Threads::Threads)
+        add_test(NAME spp_moon_worker_performance COMMAND spp_moon_worker_bench)
+        set_tests_properties(spp_moon_worker_performance PROPERTIES TIMEOUT 30)
+        spp_add_executable(spp_integrator_bench tools/integrator_bench.cpp)
+        target_include_directories(spp_integrator_bench PRIVATE ${PROJECT_SOURCE_DIR}/src)
+        target_compile_definitions(spp_integrator_bench PRIVATE SPP_GRAVITY_REFERENCE="${PROJECT_SOURCE_DIR}/tools/reference/gravity_de440.csv")
+        add_test(NAME spp_integrator_performance COMMAND spp_integrator_bench)
+        if(SPP_MOON_REFERENCE_KERNEL)
+            add_test(NAME spp_spk_performance COMMAND spp_spk_bench "${SPP_MOON_REFERENCE_KERNEL}"
+                ${PROJECT_SOURCE_DIR}/tools/reference/spk_de440s.csv)
+            add_test(NAME spp_integrator_lunar_performance COMMAND spp_integrator_bench "${SPP_MOON_REFERENCE_KERNEL}")
+        endif()
+        spp_add_executable(spp_moon_event_bench tools/moon_event_bench.cpp)
+        target_include_directories(spp_moon_event_bench PRIVATE ${PROJECT_SOURCE_DIR}/src)
+        add_test(NAME spp_moon_event_performance COMMAND spp_moon_event_bench)
+        spp_add_executable(spp_moon_phase_bench tools/moon_phase_bench.cpp)
+        target_include_directories(spp_moon_phase_bench PRIVATE ${PROJECT_SOURCE_DIR}/src)
+        add_test(NAME spp_moon_phase_performance COMMAND spp_moon_phase_bench
+            ${PROJECT_SOURCE_DIR}/tools/reference/moon_horizons_phase_tt.csv)
+        spp_add_executable(spp_moon_rotation_bench tools/moon_rotation_bench.cpp)
+        target_include_directories(spp_moon_rotation_bench PRIVATE ${PROJECT_SOURCE_DIR}/src)
+        add_test(NAME spp_moon_rotation_performance COMMAND spp_moon_rotation_bench
+            ${PROJECT_SOURCE_DIR}/tools/reference/moon_iau_rotation.csv
+            ${PROJECT_SOURCE_DIR}/tools/reference/moon_rotation_horizons.csv)
+        # Explicit opt-in report target: build prerequisites, then run every
+        # accuracy stage and the Moon-only benchmark, including after failures.
+        add_custom_target(spp_moon_report
+            COMMAND ${CMAKE_COMMAND}
+                "-DSPP_LUNAR_CHECK=$<TARGET_FILE:spp_lunar_check>"
+                "-DSPP_SKY_CHECK=$<TARGET_FILE:spp_moon_sky_check>"
+                "-DSPP_CACHE_CHECK=$<TARGET_FILE:spp_lunar_cache_check>"
+                "-DSPP_BENCH=$<TARGET_FILE:spp_bench>"
+                "-DSPP_EARTH_BENCH=$<TARGET_FILE:spp_earth_cache_bench>"
+                "-DSPP_EVENT_BENCH=$<TARGET_FILE:spp_moon_event_bench>"
+                "-DSPP_PHASE_BENCH=$<TARGET_FILE:spp_moon_phase_bench>"
+                "-DSPP_ROTATION_BENCH=$<TARGET_FILE:spp_moon_rotation_bench>"
+                "-DSPP_INTEGRATOR_BENCH=$<TARGET_FILE:spp_integrator_bench>"
+                "-DSPP_SPK_BENCH=$<TARGET_FILE:spp_spk_bench>"
+                "-DSPP_MOON_REFERENCE_KERNEL=${SPP_MOON_REFERENCE_KERNEL}"
+                "-DSPP_REFERENCE_DIR=${PROJECT_SOURCE_DIR}/tools/reference"
+                -P ${PROJECT_SOURCE_DIR}/cmake/MoonReport.cmake
+            DEPENDS spp_lunar_check spp_moon_sky_check spp_lunar_cache_check spp_bench
+                spp_earth_cache_bench spp_moon_event_bench spp_moon_phase_bench spp_moon_rotation_bench
+                spp_integrator_bench spp_spk_bench
+                ${PROJECT_SOURCE_DIR}/cmake/MoonReport.cmake
+            COMMENT "Moon accuracy and speed report"
+            USES_TERMINAL
+            VERBATIM)
+    endif()
 endif()
 
 if(SPP_BUILD_FIGURES)
@@ -278,4 +424,9 @@ if(SPP_INSTALL)
         ${PROJECT_BINARY_DIR}/SppConfigVersion.cmake
         DESTINATION ${SPP_CMAKE_DIR})
     install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/Spp)
+    install(FILES data/licenses/ERFA.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/Spp)
+    if(SPP_BUILD_MOON)
+        install(FILES data/elp_mpp02/README.md data/elp_mpp02/LICENSE data/elp_mpp02/manifest.json
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/Spp/elp_mpp02)
+    endif()
 endif()

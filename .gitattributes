@@ -3,3 +3,4 @@
 
 # VSOP87 data: third-party tables, too large to be useful in diffs.
 *.ear text eol=lf -diff linguist-vendored
+data/elp_mpp02/elp_* text eol=lf -diff linguist-vendored

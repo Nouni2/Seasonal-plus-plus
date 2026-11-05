@@ -1,9 +1,11 @@
 #include "earth_state.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
 
 #include "core/split.hpp"
 #include "spp/core/constants.hpp"
@@ -30,15 +32,21 @@ constexpr std::int64_t kSegmentDays = 16;
 constexpr int kDegree = 24;
 constexpr int kNodes = kDegree + 1;
 constexpr int kQuantities = 5;
-constexpr std::int64_t kCacheSlots = 64;   // direct-mapped: ~2.8 years of consecutive segments
+constexpr std::size_t kCacheSlots = 256, kBuckets = 512;
+constexpr std::uint16_t kTombstone = 0xffff;
 
 struct Segment {
     std::int64_t index = std::numeric_limits<std::int64_t>::min();
     std::array<double, kQuantities> offset{};
     std::array<std::array<double, kQuantities>, kNodes> c{};   // [degree][quantity]
+    std::uint64_t stamp = 0;
+    std::size_t bucket = 0;
 };
 
 thread_local std::array<Segment, kCacheSlots> cache{};
+thread_local std::array<std::uint16_t, kBuckets> lookup{};
+thread_local std::size_t tombstones = 0;
+thread_local std::uint64_t clock = 0, hits = 0, builds = 0;
 
 std::array<double, kQuantities> as_array(const EarthState& s) {
     return {s.l_rad, s.b_rad, s.r_au, s.dpsi_arcsec, s.deps_arcsec};
@@ -78,9 +86,48 @@ std::int64_t floor_div(std::int64_t a, std::int64_t b) {
 }
 
 const Segment& segment(std::int64_t index) {
-    Segment& s = cache[static_cast<std::size_t>(index - floor_div(index, kCacheSlots) * kCacheSlots)];
-    if (s.index != index) build(s, index);
-    return s;
+    auto bucket = [](std::int64_t key) {
+        auto hash = static_cast<std::uint64_t>(key);
+        hash ^= hash >> 30; hash *= 0xbf58476d1ce4e5b9ULL;
+        hash ^= hash >> 27; hash *= 0x94d049bb133111ebULL;
+        hash ^= hash >> 31;
+        return static_cast<std::size_t>(hash & (kBuckets - 1));
+    };
+    if (clock == std::numeric_limits<std::uint64_t>::max()) {
+        // Preserve recency order across the counter wrap, without changing
+        // coefficients or invalidating already resident segments.
+        std::array<Segment*, kCacheSlots> ordered{};
+        for (std::size_t i = 0; i < cache.size(); ++i) ordered[i] = &cache[i];
+        std::sort(ordered.begin(), ordered.end(), [](auto a, auto b){return a->stamp < b->stamp;});
+        clock = 0;
+        for (auto* s : ordered) if (s->stamp) s->stamp = ++clock;
+    }
+    ++clock;
+    if (tombstones > kBuckets / 4) {
+        lookup.fill(0); tombstones = 0;
+        for (std::size_t i = 0; i < cache.size(); ++i) if (cache[i].stamp) {
+            auto b = bucket(cache[i].index);
+            while (lookup[b]) b = (b + 1) & (kBuckets - 1);
+            lookup[b] = static_cast<std::uint16_t>(i + 1); cache[i].bucket = b;
+        }
+    }
+    auto pos = bucket(index), insertion = kBuckets;
+    for (std::size_t probe = 0; probe < kBuckets; ++probe, pos = (pos + 1) & (kBuckets - 1)) {
+        const auto slot = lookup[pos];
+        if (!slot) { if (insertion == kBuckets) insertion = pos; break; }
+        if (slot == kTombstone) { if (insertion == kBuckets) insertion = pos; continue; }
+        auto& s = cache[slot - 1];
+        if (s.index == index) { s.stamp = clock; ++hits; return s; }
+    }
+    if (insertion == kBuckets) throw std::logic_error("Earth cache index invariant failed");
+    auto* victim = &cache[0];
+    for (auto& s : cache) if (s.stamp < victim->stamp) victim = &s;
+    if (victim->stamp) { lookup[victim->bucket] = kTombstone; ++tombstones; }
+    build(*victim, index); ++builds;
+    if (lookup[insertion] == kTombstone) --tombstones;
+    lookup[insertion] = static_cast<std::uint16_t>(victim - cache.data() + 1);
+    victim->stamp = clock; victim->bucket = insertion;
+    return *victim;
 }
 
 EarthState evaluate(Instant<TT> t) {
@@ -124,6 +171,17 @@ EarthState earth_state(Instant<TT> t) {
     t = normalized(t);
     if (t.day != last.day || t.frac != last.frac) last = {t.day, t.frac, evaluate(t)};
     return last.state;
+}
+
+EarthCacheStats earth_cache_stats() {
+    return {hits, builds, kCacheSlots, sizeof(cache) + sizeof(lookup) + sizeof(last)
+        + sizeof(clock) + sizeof(hits) + sizeof(builds) + sizeof(tombstones)};
+}
+
+void clear_earth_cache() {
+    for (auto& s : cache) s.stamp = 0;
+    lookup.fill(0); tombstones = 0; clock = 0; hits = 0; builds = 0;
+    last = Memo{};
 }
 
 }  // namespace spp::detail

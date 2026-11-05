@@ -152,6 +152,24 @@ double Time::tt_minus_utc() const {
 
 Instant<TT> Time::tt() const { return offset<TT>(day_, frac_, tt_minus_utc()); }
 
+Instant<TDB> tdb_from_tt(Instant<TT> t) {
+    if (!(std::abs(t.frac) < 0x1p52) || t.day > (std::int64_t{1} << 62) || t.day < -(std::int64_t{1} << 62))
+        throw std::invalid_argument("spp::tdb_from_tt: invalid split Julian date");
+    t = detail::normalized(t);
+    const double T = t.centuries_since_j2000();
+    // Kaplan, USNO Circular 179 (2005), equation 2.6; seconds.
+    const double dt = 0.001657 * std::sin(628.3076 * T + 6.2401)
+        + 0.000022 * std::sin(575.3385 * T + 4.2970)
+        + 0.000014 * std::sin(1256.6152 * T + 6.1969)
+        + 0.000005 * std::sin(606.9777 * T + 4.0212)
+        + 0.000005 * std::sin(52.9691 * T + 0.4444)
+        + 0.000002 * std::sin(21.3299 * T + 5.5431)
+        + 0.000010 * T * std::sin(628.3076 * T + 4.2490);
+    return offset<TDB>(t.day, t.frac, dt);
+}
+
+Instant<TDB> Time::tdb() const { return tdb_from_tt(tt()); }
+
 double Time::decimal_year() const { return decimal_year_of(day_, frac_); }
 
 double Time::delta_t() const { return tt_minus_utc() - dut1_s_; }

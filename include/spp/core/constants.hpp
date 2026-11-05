@@ -22,6 +22,7 @@ inline constexpr double wgs84_a_m = 6378137.0;
 inline constexpr double wgs84_f = 1.0 / 298.257223563;
 inline constexpr double earth_rotation_rad_s = 7.292115e-5;   // sidereal rate
 inline constexpr double speed_of_light_m_s = 299792458.0;
+inline constexpr double astronomical_unit_km = 149597870.7;  // IAU 2012, exact
 
 // Solar constants
 inline constexpr double sun_aberration_arcsec = 20.4898;       // Meeus 25.10, divided by R

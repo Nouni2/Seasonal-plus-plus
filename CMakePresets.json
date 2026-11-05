@@ -32,6 +32,18 @@
         "CMAKE_BUILD_TYPE": "Release",
         "SPP_BUILD_CAPI": "ON"
       }
+    },
+    {
+      "name": "moon",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build/moon-${hostSystemName}",
+      "cacheVariables": {
+        "SPP_BUILD_APPS": "ON",
+        "SPP_BUILD_MOON": "ON",
+        "SPP_BUILD_VALIDATION": "ON",
+        "SPP_BUILD_BENCH": "ON",
+        "SPP_BUILD_CAPI": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -46,6 +58,10 @@
     {
       "name": "capi",
       "configurePreset": "capi"
+    },
+    {
+      "name": "moon",
+      "configurePreset": "moon"
     }
   ]
 }

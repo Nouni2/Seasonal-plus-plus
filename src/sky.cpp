@@ -86,6 +86,14 @@ GeocentricObserver geocentric_observer(const Observer& obs) {
 
 }  // namespace
 
+std::array<double, 3> observer_position_km(const Observer& obs, double lst_deg) {
+    const auto g = geocentric_observer(obs);
+    const double a_km = wgs84_a_m / 1000.0;
+    const double theta = lst_deg * deg2rad;
+    return {a_km * g.rho_cos_phi * std::cos(theta),
+            a_km * g.rho_cos_phi * std::sin(theta), a_km * g.rho_sin_phi};
+}
+
 Equatorial parallax(const Equatorial& geocentric, const Observer& obs, double lst_deg) {
     const auto [rho_cos_phi, rho_sin_phi] = geocentric_observer(obs);
 

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <stdexcept>
 
+#include "core/root_refine.hpp"
 #include "observe.hpp"
 #include "spp/core/angles.hpp"
 #include "spp/sky.hpp"
@@ -101,27 +102,7 @@ Transit transit_impl(const Time& approx, double lon_east_deg, const SolverConfig
 // a point where f is exactly 0.
 template <class F>
 double refine(F f, double lo, double f_lo, double hi, double f_hi, const SolverConfig& cfg) {
-    const double tol_days = cfg.time_tolerance_s / seconds_per_day;
-    double x = 0.5 * (lo + hi);
-    int side = 0;
-    for (int iter = 0; iter < cfg.max_iter && std::abs(hi - lo) > tol_days; ++iter) {
-        x = (lo * f_hi - hi * f_lo) / (f_hi - f_lo);
-        if (!((lo < x && x < hi) || (hi < x && x < lo))) x = 0.5 * (lo + hi);
-        const double fx = f(x);
-        if (fx == 0.0) return x;
-        if (fx > 0.0) {
-            lo = x;
-            f_lo = fx;
-            if (side == 1) f_hi *= 0.5;
-            side = 1;
-        } else {
-            hi = x;
-            f_hi = fx;
-            if (side == -1) f_lo *= 0.5;
-            side = -1;
-        }
-    }
-    return 0.5 * (lo + hi);
+    return detail::refine_root(f, lo, f_lo, hi, f_hi, cfg.time_tolerance_s / seconds_per_day, cfg.max_iter);
 }
 
 // alt_transit: apparent altitude of `point` at transit.

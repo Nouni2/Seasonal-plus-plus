@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nouni2/Seasonal-plus-plus/releases/tag/v1.1.0"><img src="https://img.shields.io/badge/version-1.1.0-F2A93B?style=flat-square" alt="Version 1.1.0"></a>
+  <a href="https://github.com/Nouni2/Seasonal-plus-plus/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/version-1.2.0-F2A93B?style=flat-square" alt="Version 1.2.0"></a>
   <a href="#building"><img src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=cplusplus&logoColor=white" alt="C++20"></a>
   <a href="#building"><img src="https://img.shields.io/badge/CMake-3.28%2B-064F8C?style=flat-square&logo=cmake&logoColor=white" alt="CMake 3.28+"></a>
   <a href="#accuracy--precision"><img src="https://img.shields.io/badge/ephemeris-VSOP87D-E07B39?style=flat-square" alt="VSOP87D ephemeris"></a>
